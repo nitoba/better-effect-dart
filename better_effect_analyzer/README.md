@@ -1,66 +1,125 @@
 # better_effect_analyzer
 
-Static analysis for `better_effect` and `better_effect_flutter`.
+[![pub package](https://img.shields.io/pub/v/better_effect_analyzer.svg)](https://pub.dev/packages/better_effect_analyzer)
+[![Dart SDK](https://img.shields.io/badge/Dart-%E2%89%A53.10.0-0175C2.svg)](https://dart.dev/)
 
-The package contains two complementary tools:
+Static analysis and whole-project dependency-graph validation for
+`better_effect` and `better_effect_flutter`.
 
-1. An official Dart Analysis Server plugin for immediate diagnostics in the IDE,
-   `dart analyze`, and `flutter analyze`.
-2. A whole-project Module graph checker for validations that need information
-   from multiple libraries, such as missing services and dependency cycles.
+This package has two complementary layers:
 
-There is intentionally a single analyzer package. Core Effect correctness and
-optional Flutter MVVM architecture rules use the same resolved AST and the same
-plugin configuration, while the runtime packages stay free of analyzer
-dependencies.
+1. an official Dart Analysis Server plugin for fast diagnostics in the IDE,
+   `dart analyze`, and `flutter analyze`;
+2. a project-wide graph checker and CLI for validating complete `Module` roots
+   across multiple Dart libraries.
 
-## Compatibility
+The plugin catches local mistakes while you edit. The graph checker answers a
+different question: whether the services requested throughout the project are
+actually provided by the application Module, and whether those providers form a
+valid dependency graph.
 
-`better_effect_analyzer` 0.1.2 intentionally targets the analyzer line used by Flutter SDKs that pin `meta` to `1.18.0`:
+The analyzer package is tooling only. It is not a runtime dependency of
+`better_effect` or `better_effect_flutter`.
+
+## What it checks
+
+The plugin registers five correctness warnings by default:
+
+- discarded lazy Effects;
+- ignored `EffectContext` operations;
+- constructor-backed Bindings without an informative service type;
+- incompatible Binding implementations;
+- duplicate service identities declared directly in a Module.
+
+It also registers four optional Flutter MVVM architecture lints:
+
+- repositories requesting other repositories;
+- ViewModels requesting low-level services;
+- Widgets resolving business dependencies directly;
+- ViewModels registered as application-lifetime singletons.
+
+The graph CLI adds whole-project checks for:
+
+- missing services in a root Module;
+- dependency cycles;
+- recursive Module composition;
+- explicitly requested Modules that do not exist;
+- duplicate or incompatible providers after Module composition.
+
+## Requirements and compatibility
+
+- Dart SDK 3.10 or newer;
+- Flutter 3.38 or newer when analyzing a Flutter application;
+- `better_effect` 0.1.x for the symbols being checked;
+- analyzer 12.x tooling.
+
+Version 0.1.2 intentionally targets the analyzer line used by Flutter SDKs that
+pin `meta` to 1.18.0:
 
 ```yaml
 dependencies:
   analysis_server_plugin: '>=0.3.14 <0.3.18'
   analyzer: ^12.1.0
+```
 
+The upper bound on `analysis_server_plugin` is deliberate: later plugin releases
+move to newer analyzer lines and may conflict with a Flutter SDK's pinned
+dependencies. Check your Flutter SDK's analyzer version before changing these
+constraints.
+
+## Installation
+
+Install the package when you want to run the project-wide graph CLI:
+
+```bash
+dart pub add --dev better_effect_analyzer
+```
+
+Or add it manually:
+
+```yaml
 dev_dependencies:
-  analyzer_testing: 0.2.5
+  better_effect_analyzer: ^0.1.2
 ```
 
-The dependency range is intentionally capped below `0.3.18`: later 0.3.x
-releases move to newer analyzer lines and can conflict with Flutter's
-SDK-pinned `meta` version.
+The Analysis Server plugin is configured from the project's top-level
+`analysis_options.yaml`. It does not need to be imported by application code or
+added as a runtime dependency.
 
-For IDE-only usage, the plugin can be configured under the top-level `plugins:` section of `analysis_options.yaml`; it does not need to be a normal Flutter runtime dependency. Add it to `dev_dependencies` only when you also want to run the project-wide graph CLI with `dart run better_effect_analyzer`.
+## Enable the Analysis Server plugin
 
-
-## Requirements
-
-- Dart 3.10 or newer for this tooling package.
-- A Flutter SDK that bundles Dart 3.10 or newer when used in a Flutter app.
-
-The official plugin system starts in Dart 3.10 / Flutter 3.38. This release keeps
-a Dart 3.10 lower bound because the official analyzer plugin system starts at
-Dart 3.10. That tooling constraint does not change the lower bound of `better_effect` or
-`better_effect_flutter`.
-
-## Local workspace
-
-A simple local layout is:
-
-```text
-workspace/
-├── better_effect/
-├── better_effect_flutter/
-├── better_effect_analyzer/
-└── my_app/
-```
-
-Enable the plugin in the **top-level** `analysis_options.yaml` of the app:
+Add the plugin to the application's top-level `analysis_options.yaml`:
 
 ```yaml
 include: package:flutter_lints/flutter.yaml
 
+plugins:
+  better_effect_analyzer:
+    version: ^0.1.2
+    diagnostics:
+      repository_requests_repository: true
+      viewmodel_requests_service: true
+      widget_requests_business_dependency: true
+      singleton_viewmodel: true
+```
+
+The five correctness warnings are enabled whenever the plugin is enabled. The
+four architecture rules above are opt-in and can be turned on independently.
+
+Restart the Dart Analysis Server after changing the `plugins` section. The
+plugin applies to both Dart and Flutter projects:
+
+```bash
+dart analyze
+flutter analyze
+```
+
+### Local monorepo development
+
+When the analyzer package is checked out beside an application, use an absolute
+path while developing the plugin:
+
+```yaml
 plugins:
   better_effect_analyzer:
     path: /absolute/path/to/workspace/better_effect_analyzer
@@ -71,81 +130,73 @@ plugins:
       singleton_viewmodel: true
 ```
 
-Restart the Dart Analysis Server after changing the `plugins` section. The
-current plugin resolver expects an absolute local path. Once the package is
-published, the path can be replaced with a normal version constraint:
+The plugin resolver expects the local path to be absolute. Published projects
+should use `version` instead.
 
-```yaml
-plugins:
-  better_effect_analyzer: ^0.1.2
-```
+### Plugin-only versus CLI usage
 
-The plugin is resolved directly from `analysis_options.yaml`; it does not need
-to be added to the application's runtime dependencies. Add it as an optional
-`dev_dependency` only when the graph CLI should be invokable from the app root:
+Use only `analysis_options.yaml` when you want IDE and analyzer diagnostics.
+Add `better_effect_analyzer` to `dev_dependencies` when you also want to run
+`dart run better_effect_analyzer` from the application root:
 
 ```yaml
 dev_dependencies:
-  better_effect_analyzer:
-    path: ../better_effect_analyzer
+  better_effect_analyzer: ^0.1.2
 ```
 
-## Default correctness warnings
+The analyzer package should not be added to `dependencies` and should never be
+imported by production Flutter code.
 
-These warnings are enabled as soon as the plugin is enabled.
+## Local plugin diagnostics
 
 ### `discarded_effect`
 
-Effects are lazy. Creating one as an expression statement does not run it:
+Effects are lazy. Constructing an Effect as a standalone expression does not
+execute it:
 
 ```dart
 repository.save(user);
-// ^ Effect created but never executed.
+// Warning: the Effect is created but never executed.
 ```
 
-Use an explicit execution or composition boundary:
+Compose or run it explicitly:
 
 ```dart
 await use.unwrap(repository.save(user));
-```
-
-```dart
 return repository.save(user);
-```
-
-```dart
 await runtime.run(repository.save(user));
 ```
 
 ### `unawaited_effect_context_operation`
 
-Operations such as `use.unwrap`, `use.result`, `use.tryAsync`, and
-`use.acquire` return Futures. Ignoring them also ignores the value and the
-intended failure propagation:
+`use.unwrap`, `use.result`, `use.tryAsync`, and `use.acquire` return Futures.
+Ignoring one loses its value and its typed failure propagation:
 
 ```dart
 use.unwrap(repository.save(user));
-//  ^ await or return this operation
+// Warning: await or return this operation.
 ```
+
+Use `await` or return the operation from the current Effect body:
 
 ```dart
 await use.unwrap(repository.save(user));
+return use.unwrap(repository.save(user));
 ```
 
 ### `missing_binding_type_argument`
 
-Constructor-backed Bindings must identify the service they register. The
-constructor parameter is intentionally typed as `Function`, so Dart cannot
-infer `T` from a tear-off alone and otherwise falls back to `Object`:
+A constructor tear-off is typed as a `Function`. Without a service type,
+Dart can infer `Object` and register the wrong contract:
 
 ```dart
 Module([
   .provide(DatabaseLive.new),
-  //       ^ add the service contract
+  // Warning: add the service type argument.
 ]);
 ```
 
-Use an explicit contract:
+Declare the contract explicitly:
 
 ```dart
 Module([
@@ -153,8 +204,7 @@ Module([
 ]);
 ```
 
-The explicit type argument is optional when a typed `ServiceKey<T>` already
-provides the inference constraint:
+A typed `ServiceKey` can also provide the inference constraint:
 
 ```dart
 .provide(DatabaseLive.new, key: primaryDatabase)
@@ -162,95 +212,113 @@ provides the inference constraint:
 
 ### `incompatible_provider`
 
-The constructor, instance, or resource registered by a Binding must satisfy the
-service contract:
+The implementation, instance, or resource acquired by a Binding must satisfy the
+registered service contract:
 
 ```dart
 Module([
   .provide<UserRepository>(AnalyticsService.new),
-  //                        ^ not a UserRepository
+  // Warning: AnalyticsService is not a UserRepository.
 ]);
 ```
 
-The rule supports both regular invocations and Dart dot shorthands.
+The rule understands regular method calls and Dart dot shorthand.
 
 ### `duplicate_service_binding`
 
-A directly declared Module cannot accidentally register the same service
-identity twice:
+A Module cannot contain two registrations with the same service type and key:
 
 ```dart
-final appModule = Module([
+final module = Module([
   .provide<Database>(SqliteDatabase.new),
   .provide<Database>(MemoryDatabase.new),
-  // ^ duplicate default Database binding
+  // Warning: duplicate unnamed Database binding.
 ]);
 ```
 
-Bindings using different `ServiceKey<T>` values remain distinct.
+Different `ServiceKey` values are different identities:
 
-## Flutter MVVM architecture lints
+```dart
+Module([
+  .provide<Database>(PrimaryDatabase.new, key: primaryDatabase),
+  .provide<Database>(AnalyticsDatabase.new, key: analyticsDatabase),
+]);
+```
 
-These lints are opt-in because not every project adopts the same boundaries.
-They implement the architecture direction used by `better_effect_flutter`:
-Views observe ViewModels, ViewModels coordinate repositories or use cases, and
-repositories access low-level services.
+## Optional Flutter MVVM architecture lints
+
+These rules are opt-in because teams use different boundaries. They implement
+the architecture direction used by `better_effect_flutter`:
+
+```text
+Widget → ViewModel → Repository/UseCase → Service
+```
 
 ### `repository_requests_repository`
 
+Repositories should not coordinate other repositories directly:
+
 ```dart
 final class BookingRepositoryLive implements BookingRepository {
-  AppEffect<Booking> create() => .result((use) async {
+  AppEffect<Booking> create() => Effect.result((use) async {
     final users = use<UserRepository>();
-    //            ^ move cross-repository composition to a UseCase or ViewModel
-    // ...
+    // Warning: move cross-repository composition to a UseCase or ViewModel.
+    return loadBooking(users);
   });
 }
 ```
 
 ### `viewmodel_requests_service`
 
+ViewModels should depend on repositories or use cases rather than low-level
+infrastructure:
+
 ```dart
 final class HomeViewModel extends EffectViewModel {
-  AppEffect<HomeData> load() => .result((use) async {
+  AppEffect<HomeData> load() => Effect.result((use) async {
     final api = use<HomeApiClient>();
-    //          ^ request a Repository or UseCase instead
-    // ...
+    // Warning: expose this operation through a Repository or UseCase.
+    return api.loadHome();
   });
 }
 ```
 
-The rule recognizes common low-level names such as `Service`, `Client`, `Api`,
-`Database`, `DataSource`, and `Storage`, plus conventional infrastructure paths.
+The rule recognizes common names such as `Service`, `Client`, `Api`,
+`Database`, `DataSource`, and `Storage`, as well as conventional
+`data/services`, `data/sources`, and `infrastructure` paths.
 
 ### `widget_requests_business_dependency`
+
+Widgets should communicate with ViewModels instead of resolving repositories,
+services, or use cases directly:
 
 ```dart
 final class HomePage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final repository = context.readEffectService<UserRepository>();
-    //                         ^ expose this through the ViewModel
-    // ...
+    // Warning: expose the dependency through the ViewModel.
+    return HomeBody(repository: repository);
   }
 }
 ```
 
-`readEffectService` remains valid at composition boundaries, such as route and
-Provider factories. The rule only reports direct business dependency reads
-inside Widget or State classes.
+`readEffectService` remains valid in route and Provider factories. The lint
+reports direct business reads inside Widget and State classes.
 
 ### `singleton_viewmodel`
+
+ViewModels normally follow the lifecycle of their View or feature rather than
+the entire application:
 
 ```dart
 Module([
   .singleton<HomeViewModel>(HomeViewModel.new),
-  // ^ ViewModels should normally follow their View or feature lifecycle
+  // Warning: create this ViewModel at a View or feature boundary.
 ]);
 ```
 
-The rule also recognizes lazy application lifetime registrations, including the
-default `.provide` lifetime:
+The rule also recognizes the default lazy-singleton behavior of `provide`:
 
 ```dart
 .provide<HomeViewModel>(HomeViewModel.new)
@@ -261,35 +329,65 @@ default `.provide` lifetime:
 )
 ```
 
-## Whole-project Module graph
+## Suppress or disable a plugin diagnostic
 
-The IDE rules are intentionally local and fast. Module completeness is a
-whole-project property: a provider can be declared in one file, request a
-service through `use<T>()` in another, and be composed into an application
-Module in a third file.
+Use normal Dart suppression syntax for an isolated exception:
 
-With the optional dev dependency configured, run the graph checker from the
-app root:
+```dart
+// ignore: better_effect_analyzer/discarded_effect
+repository.save(user);
+```
+
+Or suppress a rule for a file:
+
+```dart
+// ignore_for_file: better_effect_analyzer/repository_requests_repository
+```
+
+For a project-wide architecture decision, leave the rule out of the
+`diagnostics` map instead of suppressing every occurrence.
+
+## Whole-project Module graph checking
+
+A normal analyzer rule visits one resolved library at a time. The graph checker
+builds an `AnalysisContextCollection` for the project and indexes classes,
+service requests, constructor tear-offs, resource acquisition callbacks, and
+Module declarations across the analyzed files.
+
+By default it analyzes `lib`. Pass `--include-tests` to include `test` as well.
+Generated files ending in these suffixes are skipped by default:
+
+- `.g.dart`;
+- `.freezed.dart`;
+- `.mocks.dart`;
+- `.gr.dart`;
+- `.route.dart`.
+
+### Run from the application root
+
+If the CLI is in the application's dev dependencies:
 
 ```bash
 dart run better_effect_analyzer
 ```
 
-Without that dev dependency, run the executable from the analyzer package and
-pass the application path:
-
-```bash
-cd ../better_effect_analyzer
-dart run better_effect_analyzer ../my_app
-```
-
-Explicit project path:
+Pass an explicit project path when the current directory is not the application
+root:
 
 ```bash
 dart run better_effect_analyzer ../my_app
 ```
 
-Check named root Modules:
+### Select root Modules
+
+When no `--module` option is supplied, Modules not included by another Module
+are treated as roots:
+
+```bash
+dart run better_effect_analyzer --module appModule
+```
+
+Repeat the option to validate more than one named root:
 
 ```bash
 dart run better_effect_analyzer \
@@ -297,35 +395,56 @@ dart run better_effect_analyzer \
   --module backgroundModule
 ```
 
-Include test Modules:
+This is useful when a project intentionally has several independent
+applications, isolates, or feature roots.
+
+### Include tests
 
 ```bash
 dart run better_effect_analyzer --include-tests
 ```
 
-CI-friendly output:
+Use this when test-only Modules or fixtures should participate in graph
+validation.
+
+### Output formats and exit codes
+
+Human-readable output is the default:
+
+```bash
+dart run better_effect_analyzer
+# error   lib/config/app_module.dart:12:3 [missing_service] ...
+```
+
+Machine output is one diagnostic per line:
 
 ```bash
 dart run better_effect_analyzer --format machine
+# lib/config/app_module.dart:12:3:error:missing_service:...
 ```
 
-JSON output:
+JSON output is suitable for CI annotations or custom tooling:
 
 ```bash
 dart run better_effect_analyzer --format json
 ```
 
-### `missing_service`
+The executable exits non-zero when it finds errors. The `--fatal-warnings` flag
+is enabled by default; use `--no-fatal-warnings` when warnings should not fail
+the command.
 
-The checker combines:
+### Graph diagnostics
 
-- required constructor parameters used by AutoInjector;
-- contextual callable requests through `use<T>()` and `Services<T>()`;
-- method requests through `use.service<T>()` and `services.get<T>()`;
-- static `Effect.service<T>()` requests, including `.service<T>()` dot shorthands;
-- dependencies requested by `.resource(acquire: ...)`;
-- Module composition with spreads and `Module.merge`;
-- `Module.overrideWith`.
+#### `missing_service`
+
+The checker combines service requirements from:
+
+- non-nullable constructor parameters used by AutoInjector;
+- `use<T>()` and `EffectContext.service<T>()`;
+- callable `services<T>()` and `services.get<T>()`;
+- static `Effect.service<T>()`, including dot shorthand;
+- `resource(acquire: ...)` callbacks;
+- Module spreads, `Module.merge`, and `overrideWith`.
 
 Example:
 
@@ -334,104 +453,110 @@ error   lib/config/app_module.dart:12:3 [missing_service]
 Provider 'UserRepository' requires 'Database', but Module 'appModule' doesn't provide it.
 ```
 
-### `dependency_cycle`
+#### `dependency_cycle`
+
+The checker reports cycles across constructor and contextual dependencies:
 
 ```text
-Database -> SessionRepository -> Database
+Database → SessionRepository → Database
 ```
 
-The checker reports cycles across both constructor-injected and contextual
-services.
+#### `module_composition_cycle`
 
-### Other graph diagnostics
+This reports recursive composition such as a Module that eventually includes
+itself through `Module.merge`, spreads, or `overrideWith`.
 
-- `duplicate_service_binding`
-- `incompatible_provider`
-- `module_composition_cycle`
-- `module_not_found`
+#### `module_not_found`
 
-## Root Module selection
+This reports a name passed to `--module` when no matching Module declaration is
+found in the analyzed project.
 
-When no `--module` option is supplied, reusable Modules included by another
-Module are treated as partial environments. Modules that are not composed into
-another Module are treated as roots.
+#### Provider diagnostics in the graph
 
-Use repeated `--module` options when root selection must be explicit or when
-Module composition contains dynamic runtime control flow.
+The graph also reports `duplicate_service_binding` and
+`incompatible_provider` after all included Modules and overrides are flattened.
+The IDE versions of these rules remain useful for immediate local feedback.
 
-## CI
+### Static-analysis boundary
 
-A typical Flutter pipeline runs both analysis layers:
+The checker follows statically visible declarations, list spreads, Module
+composition, constructor tear-offs, and contextual requests. It cannot
+reconstruct dependency lists assembled through reflection, runtime-generated
+code, or complex dynamic control flow. Prefer declarative Modules when graph
+validation is part of CI.
 
-```bash
-flutter analyze --fatal-infos
-dart run ../better_effect_analyzer --format machine
-flutter test
-```
+## Embed the graph checker
 
-## Suppression
-
-Plugin diagnostics use the normal Dart suppression syntax:
-
-```dart
-// ignore: better_effect_analyzer/discarded_effect
-repository.save(user);
-```
-
-Or for a file:
-
-```dart
-// ignore_for_file: better_effect_analyzer/repository_requests_repository
-```
-
-Architecture rules should preferably be disabled in `analysis_options.yaml`
-when a project deliberately follows different boundaries.
-
-## Library API
-
-The graph checker can also be embedded in tooling:
+The public library exposes the graph model for custom tooling:
 
 ```dart
 import 'package:better_effect_analyzer/better_effect_analyzer.dart';
 
-final result = await BetterEffectGraphChecker(
-  '/path/to/app',
-).check(
+final result = await BetterEffectGraphChecker('/path/to/app').check(
   options: const GraphCheckOptions(
+    includeTests: true,
     moduleNames: {'appModule'},
   ),
 );
+
+for (final diagnostic in result.diagnostics) {
+  print(diagnostic.toMachine());
+}
+
+if (result.hasErrors) {
+  throw StateError('The better_effect graph is invalid.');
+}
 ```
 
-## Development
+Available result helpers:
+
+- `GraphDiagnostic.toJson` and `GraphCheckResult.toJson`;
+- `GraphDiagnostic.toMachine`;
+- `GraphCheckResult.hasErrors` and `hasWarnings`;
+- sorted, immutable `diagnostics`.
+
+Use `excludedSuffixes` in `GraphCheckOptions` when a generator uses additional
+file suffixes:
+
+```dart
+const options = GraphCheckOptions(
+  excludedSuffixes: {'.generated.dart', '.g.dart'},
+);
+```
+
+## CI recipe
+
+A Flutter project can run both layers:
+
+```bash
+flutter analyze --fatal-infos
+dart run better_effect_analyzer --format machine
+flutter test
+```
+
+A Dart-only project can replace the first and last commands with
+`dart analyze --fatal-infos` and `dart test`.
+
+## Development and API reference
+
+From this package directory:
 
 ```bash
 dart pub get
+dart analyze --fatal-infos
+dart test
+dart run bin/better_effect_analyzer.dart --help
 ./tool/check.sh
 ```
 
-## Static-analysis boundary
+- [API documentation](https://pub.dev/documentation/better_effect_analyzer/latest/)
+- [Architecture notes](doc/architecture.md)
+- [Diagnostic catalog](doc/diagnostics.md)
+- [Changelog](CHANGELOG.md)
+- [Source repository](https://github.com/nitoba/better-effect-dart)
 
-The graph checker follows statically visible Module declarations, list spreads,
-`Module.merge`, `overrideWith`, constructor tear-offs, and contextual service
-requests. It cannot reconstruct arbitrary dependency lists assembled through
-runtime reflection or complex dynamic control flow. Prefer declarative Modules
-when compile-time graph validation matters.
+The public import is:
 
-## Flutter / analyzer compatibility
-
-This release intentionally targets the analyzer 12.1 toolchain so it can coexist
-with Flutter SDKs that pin `meta` to `1.18.0`.
-
-```yaml
-dependencies:
-  analysis_server_plugin: 0.3.14
-  analyzer: 12.1.0
-
-dev_dependencies:
-  analyzer_testing: 0.2.5
-  test: 1.31.1
+```dart
+import 'package:better_effect_analyzer/better_effect_analyzer.dart';
 ```
-
-`NamedArgument` is an analyzer 13+ AST type. This package uses
-`NamedExpression`, which is the corresponding API in analyzer 12.1.
