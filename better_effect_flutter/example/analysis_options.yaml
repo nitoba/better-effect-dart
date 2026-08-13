@@ -1,0 +1,10 @@
+include: package:flutter_lints/flutter.yaml
+
+plugins:
+  better_effect_analyzer:
+    path: ../../better_effect_analyzer
+    diagnostics:
+      repository_requests_repository: true
+      viewmodel_requests_service: true
+      widget_requests_business_dependency: true
+      singleton_viewmodel: true

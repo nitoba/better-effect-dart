@@ -1,0 +1,23 @@
+name: better_effect_flutter_example
+description: MVVM task app demonstrating better_effect_flutter.
+publish_to: none
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.10.0 <4.0.0"
+
+flutter:
+  uses-material-design: true
+
+dependencies:
+  better_effect_flutter:
+    path: ..
+  flutter:
+    sdk: flutter
+
+dev_dependencies:
+  better_effect_analyzer:
+    path: ../../better_effect_analyzer
+  flutter_lints: ^6.0.0
+  flutter_test:
+    sdk: flutter

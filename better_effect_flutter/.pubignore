@@ -1,0 +1,8 @@
+.dart_tool/
+.github/
+build/
+coverage/
+docs/
+tool/
+example/.dart_tool/
+example/build/
