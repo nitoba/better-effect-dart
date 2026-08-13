@@ -1,3 +1,8 @@
+## 0.1.3
+
+- Expanded the package documentation with plugin setup, diagnostics, graph
+  validation, CLI, CI, and API usage guidance.
+
 ## 0.1.2
 
 - Prepared the analyzer plugin and graph checker for independent pub.dev publication.

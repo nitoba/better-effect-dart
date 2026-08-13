@@ -1,3 +1,8 @@
+## 0.1.1
+
+- Expanded the package documentation with complete installation, composition,
+  runtime, resource, testing, and operational guidance.
+
 ## 0.1.0
 
 - Initial core implementation.

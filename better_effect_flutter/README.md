@@ -98,7 +98,7 @@ Or add it manually:
 
 ```yaml
 dependencies:
-  better_effect_flutter: ^0.1.0
+  better_effect_flutter: ^0.1.1
 ```
 
 During local monorepo development, this repository uses an ignored

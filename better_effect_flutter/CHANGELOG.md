@@ -1,3 +1,9 @@
+## 0.1.1
+
+- Expanded the package documentation with complete bootstrap, Command,
+  ViewModel, widget, lifecycle, testing, and concurrency guidance.
+- Updated the hosted `better_effect` dependency to `0.1.1`.
+
 ## 0.1.0
 
 - Added `EffectCommand0` and typed-input `EffectCommand`.

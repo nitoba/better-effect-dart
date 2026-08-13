@@ -1,6 +1,6 @@
 name: better_effect
 description: Contextual dependency injection, typed error propagation, and scoped resources for result_dart.
-version: 0.1.0
+version: 0.1.1
 repository: https://github.com/nitoba/better-effect-dart
 issue_tracker: https://github.com/nitoba/better-effect-dart/issues
 documentation: https://github.com/nitoba/better-effect-dart/tree/main/better_effect

@@ -1,6 +1,6 @@
 name: better_effect_flutter
 description: Flutter MVVM integration for better_effect with typed EffectCommand state, scoped Runtime bootstrap, and one-shot UI listeners.
-version: 0.1.0
+version: 0.1.1
 repository: https://github.com/nitoba/better-effect-dart
 issue_tracker: https://github.com/nitoba/better-effect-dart/issues
 documentation: https://github.com/nitoba/better-effect-dart/tree/main/better_effect_flutter/doc
@@ -16,7 +16,7 @@ environment:
   flutter: ">=3.38.0"
 
 dependencies:
-  better_effect: ^0.1.0
+  better_effect: ^0.1.1
   flutter:
     sdk: flutter
 
