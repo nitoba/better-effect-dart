@@ -2,7 +2,7 @@ include: package:flutter_lints/flutter.yaml
 
 plugins:
   better_effect_analyzer:
-    path: ../../better_effect_analyzer
+    version: ^0.1.2
     diagnostics:
       repository_requests_repository: true
       viewmodel_requests_service: true

@@ -5,6 +5,7 @@ flutter pub get
 dart format .
 flutter analyze --fatal-infos
 flutter test
+flutter pub publish --dry-run --ignore-warnings
 
 (
   cd example

@@ -19,7 +19,6 @@ final class ViewModelRequestsServiceTest extends BetterEffectRuleTest {
 
   Future<void> test_reportsLowLevelServiceRequest() async {
     const source = r'''
-import 'package:better_effect/better_effect.dart';
 import 'package:better_effect_flutter/better_effect_flutter.dart';
 
 final class AppFailure implements Exception {}
@@ -34,15 +33,11 @@ final class HomeViewModel extends EffectViewModel {
 ''';
 
     final offset = source.indexOf('use<HomeApiClient>()');
-    await assertDiagnostics(
-      source,
-      [lint(offset, 'use<HomeApiClient>()'.length)],
-    );
+    await assertDiagnostics(source, [lint(offset, 'use<HomeApiClient>()'.length)]);
   }
 
   Future<void> test_reportsDotShorthandStaticServiceRequest() async {
     const source = r'''
-import 'package:better_effect/better_effect.dart';
 import 'package:better_effect_flutter/better_effect_flutter.dart';
 
 abstract interface class HomeApiClient {}
@@ -53,15 +48,11 @@ final class HomeViewModel extends EffectViewModel {
 ''';
 
     final offset = source.indexOf('.service<HomeApiClient>()');
-    await assertDiagnostics(
-      source,
-      [lint(offset, '.service<HomeApiClient>()'.length)],
-    );
+    await assertDiagnostics(source, [lint(offset, '.service<HomeApiClient>()'.length)]);
   }
 
   Future<void> test_allowsRepositoryRequest() async {
     await assertNoDiagnostics(r'''
-import 'package:better_effect/better_effect.dart';
 import 'package:better_effect_flutter/better_effect_flutter.dart';
 
 final class AppFailure implements Exception {}

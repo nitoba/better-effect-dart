@@ -1,3 +1,8 @@
+## 0.1.2
+
+- Prepared the analyzer plugin and graph checker for independent pub.dev publication.
+- Aligned the published compatibility documentation with the 0.1.2 release.
+
 ## 0.1.1
 
 - Added the official Dart Analysis Server plugin entry point.

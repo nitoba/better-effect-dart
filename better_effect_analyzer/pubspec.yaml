@@ -5,13 +5,14 @@ description: >-
 version: 0.1.2
 repository: https://github.com/nitoba/better-effect-dart
 issue_tracker: https://github.com/nitoba/better-effect-dart/issues
+documentation: https://github.com/nitoba/better-effect-dart/tree/main/better_effect_analyzer/doc
 
 environment:
   sdk: '>=3.10.0 <4.0.0'
 
 dependencies:
-  analysis_server_plugin: 0.3.14
-  analyzer: 12.1.0
+  analysis_server_plugin: '>=0.3.14 <0.3.18'
+  analyzer: ^12.1.0
   args: ^2.7.0
   path: ^1.9.1
 

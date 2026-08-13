@@ -28,15 +28,12 @@ final class HomePage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final repository = context.readEffectService<UserRepository>();
-    throw UnimplementedError('$repository');
+    return repository as Never;
   }
 }
 ''';
 
     final offset = source.indexOf('readEffectService');
-    await assertDiagnostics(
-      source,
-      [lint(offset, 'readEffectService'.length)],
-    );
+    await assertDiagnostics(source, [lint(offset, 'readEffectService'.length)]);
   }
 }

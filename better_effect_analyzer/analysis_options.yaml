@@ -1,8 +1,11 @@
 include: package:lints/recommended.yaml
 
 analyzer:
+  exclude:
+    - example/**
   errors:
     deprecated_member_use: ignore
+    non_constant_identifier_names: ignore
 
 linter:
   rules:

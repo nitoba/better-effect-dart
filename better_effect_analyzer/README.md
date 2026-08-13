@@ -16,18 +16,20 @@ dependencies.
 
 ## Compatibility
 
-`better_effect_analyzer` 0.1.1 intentionally targets the analyzer line used by Flutter SDKs that pin `meta` to `1.18.0`:
+`better_effect_analyzer` 0.1.2 intentionally targets the analyzer line used by Flutter SDKs that pin `meta` to `1.18.0`:
 
 ```yaml
 dependencies:
-  analysis_server_plugin: 0.3.14
-  analyzer: 12.1.0
+  analysis_server_plugin: '>=0.3.14 <0.3.18'
+  analyzer: ^12.1.0
 
 dev_dependencies:
   analyzer_testing: 0.2.5
 ```
 
-Do not widen `analysis_server_plugin` to `^0.3.14`: later 0.3.x releases move to analyzer 13/14 and can conflict with Flutter's SDK-pinned `meta` version.
+The dependency range is intentionally capped below `0.3.18`: later 0.3.x
+releases move to newer analyzer lines and can conflict with Flutter's
+SDK-pinned `meta` version.
 
 For IDE-only usage, the plugin can be configured under the top-level `plugins:` section of `analysis_options.yaml`; it does not need to be a normal Flutter runtime dependency. Add it to `dev_dependencies` only when you also want to run the project-wide graph CLI with `dart run better_effect_analyzer`.
 
@@ -75,7 +77,7 @@ published, the path can be replaced with a normal version constraint:
 
 ```yaml
 plugins:
-  better_effect_analyzer: ^0.1.1
+  better_effect_analyzer: ^0.1.2
 ```
 
 The plugin is resolved directly from `analysis_options.yaml`; it does not need

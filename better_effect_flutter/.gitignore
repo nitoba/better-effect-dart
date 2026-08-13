@@ -1,6 +1,8 @@
 .dart_tool/
 .packages
 .pub/
+pubspec.lock
+pubspec_overrides.yaml
 build/
 coverage/
 .flutter-plugins
@@ -10,3 +12,4 @@ coverage/
 *.iml
 example/.dart_tool/
 example/build/
+example/pubspec_overrides.yaml

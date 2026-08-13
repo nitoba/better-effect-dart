@@ -19,7 +19,6 @@ final class SingletonViewModelTest extends BetterEffectRuleTest {
 
   Future<void> test_reportsSingletonViewModel() async {
     const source = r'''
-import 'package:better_effect/better_effect.dart';
 import 'package:better_effect_flutter/better_effect_flutter.dart';
 
 final class HomeViewModel extends EffectViewModel {}
@@ -35,7 +34,6 @@ final module = Module([
 
   Future<void> test_reportsDefaultProvideLifetime() async {
     const source = r'''
-import 'package:better_effect/better_effect.dart';
 import 'package:better_effect_flutter/better_effect_flutter.dart';
 
 final class HomeViewModel extends EffectViewModel {}
@@ -51,7 +49,6 @@ final module = Module([
 
   Future<void> test_reportsProvideWithSingletonLifetime() async {
     const source = r'''
-import 'package:better_effect/better_effect.dart';
 import 'package:better_effect_flutter/better_effect_flutter.dart';
 
 final class HomeViewModel extends EffectViewModel {}
@@ -70,7 +67,6 @@ final module = Module([
 
   Future<void> test_reportsViewModelInstance() async {
     const source = r'''
-import 'package:better_effect/better_effect.dart';
 import 'package:better_effect_flutter/better_effect_flutter.dart';
 
 final class HomeViewModel extends EffectViewModel {}
@@ -86,7 +82,6 @@ final module = Module([
 
   Future<void> test_allowsFactoryViewModel() async {
     await assertNoDiagnostics(r'''
-import 'package:better_effect/better_effect.dart';
 import 'package:better_effect_flutter/better_effect_flutter.dart';
 
 final class HomeViewModel extends EffectViewModel {}

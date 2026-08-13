@@ -41,8 +41,7 @@ It does not depend on `result_command` and does not collapse typed failures into
 
 - Dart 3.10 or newer;
 - Flutter 3.38 or newer;
-- the `better_effect` core package available as a sibling while developing
-  locally.
+- `better_effect` 0.1.x.
 
 Recommended workspace:
 
@@ -52,22 +51,21 @@ my_workspace/
 └── better_effect_flutter/
 ```
 
-This development package currently uses:
+Published packages use the hosted core dependency:
 
 ```yaml
 dependencies:
-  better_effect:
-    path: ../better_effect
+  better_effect: ^0.1.0
 ```
 
-Replace the path with a hosted version constraint before publishing.
+When working in this repository, the checked-out core package is selected by
+`pubspec_overrides.yaml`; that local-only file is not uploaded to pub.dev.
 
 ## Install in an application
 
 ```yaml
 dependencies:
-  better_effect_flutter:
-    path: ../better_effect_flutter
+  better_effect_flutter: ^0.1.0
 ```
 
 One import exposes the Flutter integration and re-exports the core API:
