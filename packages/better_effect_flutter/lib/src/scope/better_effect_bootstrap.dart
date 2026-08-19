@@ -138,21 +138,8 @@ final class _BetterEffectBootstrapState extends State<BetterEffectBootstrap> {
   @override
   void initState() {
     super.initState();
-
     _configureLifecycleListener();
-
-    if (widget.loadingBuilder == null) {
-      unawaited(_start());
-      return;
-    }
-
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) {
-        return;
-      }
-
-      unawaited(_start());
-    });
+    unawaited(_start());
   }
 
   Future<void> _closeRuntime(Runtime runtime) async {
@@ -197,8 +184,7 @@ final class _BetterEffectBootstrapState extends State<BetterEffectBootstrap> {
       return null;
     }
 
-    // Espera o Flutter realmente apresentar
-    // o estado de loading.
+    // Wait until Flutter has presented the loading state at least once.
     await WidgetsBinding.instance.endOfFrame;
 
     if (!mounted || generation != _generation) {
