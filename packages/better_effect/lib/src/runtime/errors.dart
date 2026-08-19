@@ -46,6 +46,31 @@ final class DuplicateServiceBindingException implements Exception {
   }
 }
 
+/// Identifies the Module resource whose acquisition failed.
+///
+/// [cause] keeps the backend or user-code exception intact. Dependency
+/// containers can include their resolution path in that cause, while this
+/// wrapper adds the resource identity that was being started.
+final class ResourceAcquisitionException implements Exception {
+  const ResourceAcquisitionException({
+    required this.serviceType,
+    required this.cause,
+    required this.causeStackTrace,
+    this.key,
+  });
+
+  final Type serviceType;
+  final String? key;
+  final Object cause;
+  final StackTrace causeStackTrace;
+
+  @override
+  String toString() {
+    final suffix = key == null ? '' : ' using key "$key"';
+    return 'Failed to acquire Module resource $serviceType$suffix. Cause: $cause';
+  }
+}
+
 /// Thrown when an operation is attempted after a [Runtime] stops accepting work.
 final class RuntimeClosedException implements Exception {
   const RuntimeClosedException();
