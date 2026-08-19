@@ -4,9 +4,6 @@ part of '../../better_effect.dart';
 typedef ResourceAcquire<T extends Object> =
     FutureOr<T> Function(Services services);
 
-/// Releases a resource owned by the runtime.
-typedef ResourceRelease<T extends Object> = FutureOr<void> Function(T value);
-
 final class _BindingIdentity {
   const _BindingIdentity(this.serviceType, this.backendKey);
 
@@ -96,7 +93,8 @@ sealed class Binding {
   /// Register an asynchronously acquired, runtime-owned resource.
   ///
   /// Resources are acquired in module declaration order and released in reverse
-  /// order when the runtime closes.
+  /// order when the Runtime closes. The release callback receives the outcome
+  /// that closed the Runtime Scope.
   static Binding resource<T extends Object>({
     required ResourceAcquire<T> acquire,
     required ResourceRelease<T> release,
@@ -188,25 +186,11 @@ final class _ResourceBinding<T extends Object> extends Binding {
 
   @override
   Future<void> _startResource(_RuntimeContext context) async {
-    final value = await Future<T>.sync(() => acquire(Services._(context)));
+    final value = await context.scope._acquire(
+      () => Future<T>.sync(() => acquire(Services._(context))),
+      release,
+    );
 
-    try {
-      context.backend.registerInstance<T>(value, key: key?._backendKey);
-
-      context.scope._addFinalizer((_) => release(value));
-    } catch (error, stackTrace) {
-      try {
-        await Future<void>.sync(() => release(value));
-      } catch (releaseError, releaseStackTrace) {
-        throw CompositeDefect(
-          primary: error,
-          primaryStackTrace: stackTrace,
-          secondary: releaseError,
-          secondaryStackTrace: releaseStackTrace,
-        );
-      }
-
-      Error.throwWithStackTrace(error, stackTrace);
-    }
+    context.backend.registerInstance<T>(value, key: key?._backendKey);
   }
 }

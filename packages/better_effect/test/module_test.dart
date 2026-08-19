@@ -134,7 +134,6 @@ void main() {
       final effect = Effect<(int, int), Never>.result((use) async {
         final primaryCounter = use(primary);
         final analyticsCounter = use(analytics);
-
         return (primaryCounter.next(), analyticsCounter.next());
       });
 
@@ -160,7 +159,7 @@ void main() {
     final module = Module([
       .resource<RuntimeResource>(
         acquire: (_) async => const RuntimeResource('ready'),
-        release: (_) async {},
+        release: (_, _) async {},
       ),
       .singleton<EagerService>(EagerService.new),
     ]);

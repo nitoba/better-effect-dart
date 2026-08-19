@@ -54,12 +54,12 @@ final class RuntimeClosedException implements Exception {
   String toString() => 'The better_effect Runtime is closed or closing.';
 }
 
-/// Thrown when a finalizer is added to a scope that is already closed.
+/// Thrown when new work is added to a [Scope] after closing starts.
 final class ScopeClosedException implements Exception {
   const ScopeClosedException();
 
   @override
-  String toString() => 'Cannot add a finalizer to a closed Scope.';
+  String toString() => 'Cannot add work to a closed Scope.';
 }
 
 /// Aggregates one or more defects raised while releasing scoped resources.
