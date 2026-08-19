@@ -59,9 +59,7 @@ void main() {
 
   test('preserves unexpected defects', () async {
     final command = commands<int, TestFailure>(
-      () => Effect<int, TestFailure>.sync(
-        () => throw StateError('boom'),
-      ),
+      () => Effect<int, TestFailure>.sync(() => throw StateError('boom')),
     );
     addTearDown(command.dispose);
 
@@ -73,27 +71,30 @@ void main() {
     expect(command.resultOrNull, isNull);
   });
 
-  test('drop returns the active execution instead of duplicating work', () async {
-    final gate = Completer<int>();
-    var starts = 0;
+  test(
+    'drop returns the active execution instead of duplicating work',
+    () async {
+      final gate = Completer<int>();
+      var starts = 0;
 
-    final command = commands<int, TestFailure>(
-      () => Effect<int, TestFailure>.result((_) async {
-        starts++;
-        return gate.future;
-      }),
-    );
-    addTearDown(command.dispose);
+      final command = commands<int, TestFailure>(
+        () => Effect<int, TestFailure>.result((_) async {
+          starts++;
+          return gate.future;
+        }),
+      );
+      addTearDown(command.dispose);
 
-    final first = command.execute();
-    final second = command.execute();
+      final first = command.execute();
+      final second = command.execute();
 
-    expect(identical(first, second), isTrue);
-    gate.complete(1);
+      expect(identical(first, second), isTrue);
+      gate.complete(1);
 
-    await first;
-    expect(starts, 1);
-  });
+      await first;
+      expect(starts, 1);
+    },
+  );
 
   test('latest ignores stale completions in visible state', () async {
     final firstGate = Completer<int>();
@@ -209,12 +210,10 @@ void main() {
     final gate = Completer<int>();
     final started = <int>[];
 
-    final command = commands.withInput<int, int, TestFailure>(
-      (input) {
-        started.add(input);
-        return Effect<int, TestFailure>.result((_) => gate.future);
-      },
-    );
+    final command = commands.withInput<int, int, TestFailure>((input) {
+      started.add(input);
+      return Effect<int, TestFailure>.result((_) => gate.future);
+    });
     addTearDown(command.dispose);
 
     final first = command.execute(1);
@@ -248,10 +247,7 @@ void main() {
 
   test('global observer receives labeled state transitions', () async {
     final transitions = <EffectCommandTransition>[];
-    final observedCommands = EffectCommands(
-      runtime,
-      observer: transitions.add,
-    );
+    final observedCommands = EffectCommands(runtime, observer: transitions.add);
     final command = observedCommands<int, TestFailure>(
       () => Effect<int, TestFailure>.succeed(5),
       debugLabel: 'observed-command',

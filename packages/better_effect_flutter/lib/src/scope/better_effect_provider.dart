@@ -22,8 +22,8 @@ final class BetterEffectProvider extends StatefulWidget {
     this.observer,
     this.onRuntimeCloseError,
     super.key,
-  })  : closeRuntimeOnDispose = false,
-        closeRuntimeOnDetach = false;
+  }) : closeRuntimeOnDispose = false,
+       closeRuntimeOnDetach = false;
 
   final Runtime runtime;
 
@@ -35,8 +35,7 @@ final class BetterEffectProvider extends StatefulWidget {
 
   final bool closeRuntimeOnDetach;
 
-  final void Function(Object error, StackTrace stackTrace)?
-      onRuntimeCloseError;
+  final void Function(Object error, StackTrace stackTrace)? onRuntimeCloseError;
 
   @override
   State<BetterEffectProvider> createState() => _BetterEffectProviderState();
@@ -49,10 +48,7 @@ final class _BetterEffectProviderState extends State<BetterEffectProvider> {
   @override
   void initState() {
     super.initState();
-    _commands = EffectCommands(
-      widget.runtime,
-      observer: widget.observer,
-    );
+    _commands = EffectCommands(widget.runtime, observer: widget.observer);
     _configureLifecycleListener();
   }
 
@@ -64,10 +60,7 @@ final class _BetterEffectProviderState extends State<BetterEffectProvider> {
     final observerChanged = !identical(oldWidget.observer, widget.observer);
 
     if (runtimeChanged || observerChanged) {
-      _commands = EffectCommands(
-        widget.runtime,
-        observer: widget.observer,
-      );
+      _commands = EffectCommands(widget.runtime, observer: widget.observer);
     }
 
     if (runtimeChanged && oldWidget.closeRuntimeOnDispose) {

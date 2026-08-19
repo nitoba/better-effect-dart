@@ -23,37 +23,37 @@ sealed class EffectCommandState<A extends Object, E extends Object> {
 
   /// The latest successful value visible from this state, when available.
   A? get dataOrNull => switch (this) {
-        EffectCommandIdle<A, E>(:final previous) => previous,
-        EffectCommandRunning<A, E>(:final previous) => previous,
-        EffectCommandSuccess<A, E>(:final value) => value,
-        EffectCommandFailure<A, E>(:final previous) => previous,
-        EffectCommandDefect<A, E>(:final previous) => previous,
-        EffectCommandInterrupted<A, E>(:final previous) => previous,
-      };
+    EffectCommandIdle<A, E>(:final previous) => previous,
+    EffectCommandRunning<A, E>(:final previous) => previous,
+    EffectCommandSuccess<A, E>(:final value) => value,
+    EffectCommandFailure<A, E>(:final previous) => previous,
+    EffectCommandDefect<A, E>(:final previous) => previous,
+    EffectCommandInterrupted<A, E>(:final previous) => previous,
+  };
 
   /// Previous successful data retained by this state, when available.
   A? get previousOrNull => switch (this) {
-        EffectCommandSuccess<A, E>() => null,
-        _ => dataOrNull,
-      };
+    EffectCommandSuccess<A, E>() => null,
+    _ => dataOrNull,
+  };
 
   /// The expected, typed failure visible from this state, when available.
   E? get errorOrNull => switch (this) {
-        EffectCommandFailure<A, E>(:final error) => error,
-        _ => null,
-      };
+    EffectCommandFailure<A, E>(:final error) => error,
+    _ => null,
+  };
 
   /// The unexpected defect visible from this state, when available.
   Object? get defectOrNull => switch (this) {
-        EffectCommandDefect<A, E>(:final defect) => defect,
-        _ => null,
-      };
+    EffectCommandDefect<A, E>(:final defect) => defect,
+    _ => null,
+  };
 
   /// The defect stack trace visible from this state, when available.
   StackTrace? get defectStackTraceOrNull => switch (this) {
-        EffectCommandDefect<A, E>(:final stackTrace) => stackTrace,
-        _ => null,
-      };
+    EffectCommandDefect<A, E>(:final stackTrace) => stackTrace,
+    _ => null,
+  };
 
   bool get isIdle => this is EffectCommandIdle<A, E>;
 
@@ -146,7 +146,8 @@ final class EffectCommandFailure<A extends Object, E extends Object>
   final A? previous;
 
   @override
-  String toString() => 'EffectCommandFailure('
+  String toString() =>
+      'EffectCommandFailure('
       'executionId: $executionId, error: $error, previous: $previous)';
 }
 
@@ -172,7 +173,8 @@ final class EffectCommandDefect<A extends Object, E extends Object>
   final A? previous;
 
   @override
-  String toString() => 'EffectCommandDefect('
+  String toString() =>
+      'EffectCommandDefect('
       'executionId: $executionId, defect: $defect, previous: $previous)';
 }
 
@@ -195,6 +197,7 @@ final class EffectCommandInterrupted<A extends Object, E extends Object>
   final A? previous;
 
   @override
-  String toString() => 'EffectCommandInterrupted('
+  String toString() =>
+      'EffectCommandInterrupted('
       'executionId: $executionId, previous: $previous)';
 }

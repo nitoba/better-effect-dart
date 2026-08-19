@@ -35,28 +35,20 @@ final class TaskDto {
   final bool completed;
 
   Task toDomain() {
-    return Task(
-      id: TaskId(id),
-      title: title,
-      completed: completed,
-    );
+    return Task(id: TaskId(id), title: title, completed: completed);
   }
 }
 
 final class InMemoryTaskService implements TaskService {
   InMemoryTaskService()
-      : _tasks = <TaskDto>[
-          const TaskDto(
-            id: 1,
-            title: 'Read the Flutter architecture guide',
-            completed: true,
-          ),
-          const TaskDto(
-            id: 2,
-            title: 'Compose a typed Effect',
-            completed: false,
-          ),
-        ];
+    : _tasks = <TaskDto>[
+        const TaskDto(
+          id: 1,
+          title: 'Read the Flutter architecture guide',
+          completed: true,
+        ),
+        const TaskDto(id: 2, title: 'Compose a typed Effect', completed: false),
+      ];
 
   final List<TaskDto> _tasks;
 
@@ -70,11 +62,7 @@ final class InMemoryTaskService implements TaskService {
   Future<TaskDto> addTask(String title) async {
     await Future<void>.delayed(const Duration(milliseconds: 250));
 
-    final task = TaskDto(
-      id: _tasks.length + 1,
-      title: title,
-      completed: false,
-    );
+    final task = TaskDto(id: _tasks.length + 1, title: title, completed: false);
     _tasks.add(task);
     return task;
   }

@@ -28,8 +28,9 @@ final class CounterViewModel extends EffectViewModel {
 }
 
 void main() {
-  testWidgets('builder keeps a ViewModel across ordinary parent rebuilds',
-      (tester) async {
+  testWidgets('builder keeps a ViewModel across ordinary parent rebuilds', (
+    tester,
+  ) async {
     final runtime = await Module(const <Binding>[]).start();
     addTearDown(runtime.close);
 

@@ -27,10 +27,7 @@ final class BetterEffectScope extends InheritedWidget {
         : context.getInheritedWidgetOfExactType<BetterEffectScope>();
   }
 
-  static BetterEffectScope of(
-    BuildContext context, {
-    bool listen = true,
-  }) {
+  static BetterEffectScope of(BuildContext context, {bool listen = true}) {
     final scope = maybeOf(context, listen: listen);
     if (scope != null) {
       return scope;
