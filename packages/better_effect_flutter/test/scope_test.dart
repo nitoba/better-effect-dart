@@ -13,7 +13,10 @@ void main() {
     final runtime = await Module(const <Binding>[]).start();
 
     await tester.pumpWidget(
-      BetterEffectProvider(runtime: runtime, child: const SizedBox()),
+      BetterEffectProvider(
+        runtime: runtime,
+        child: const SizedBox(),
+      ),
     );
 
     expect(runtime.isClosed, isFalse);
@@ -24,13 +27,15 @@ void main() {
     expect(runtime.isClosed, isTrue);
   });
 
-  testWidgets('value provider leaves Runtime ownership to its caller', (
-    tester,
-  ) async {
+  testWidgets('value provider leaves Runtime ownership to its caller',
+      (tester) async {
     final runtime = await Module(const <Binding>[]).start();
 
     await tester.pumpWidget(
-      BetterEffectProvider.value(runtime: runtime, child: const SizedBox()),
+      BetterEffectProvider.value(
+        runtime: runtime,
+        child: const SizedBox(),
+      ),
     );
 
     await tester.pumpWidget(const SizedBox());
@@ -40,24 +45,25 @@ void main() {
     await runtime.close();
   });
 
-  testWidgets('bootstrap starts a Module and exposes the Runtime', (
-    tester,
-  ) async {
+  testWidgets('bootstrap starts a Module and exposes the Runtime',
+      (tester) async {
     final startGate = Completer<_BootstrapResource>();
     Runtime? scopedRuntime;
 
     final module = Module([
       .resource<_BootstrapResource>(
         acquire: (_) => startGate.future,
-        release: (_) {},
+        release: (_, _) {},
       ),
     ]);
 
     await tester.pumpWidget(
       BetterEffectBootstrap(
         module: module,
-        loadingBuilder: (_) =>
-            const Text('loading', textDirection: TextDirection.ltr),
+        loadingBuilder: (_) => const Text(
+          'loading',
+          textDirection: TextDirection.ltr,
+        ),
         builder: (context) {
           scopedRuntime = context.effectRuntime;
           return const Text('ready', textDirection: TextDirection.ltr);
