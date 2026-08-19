@@ -104,8 +104,6 @@ final class Scope {
 
   Scope _fork() => fork();
 
-  void _addFinalizer(ScopeFinalizer finalizer) => addFinalizer(finalizer);
-
   Future<R> _acquire<R extends Object>(
     FutureOr<R> Function() operation,
     ResourceRelease<R> release,
