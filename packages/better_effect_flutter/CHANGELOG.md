@@ -1,3 +1,13 @@
+## Unreleased
+
+- Effect Commands now start work through core `EffectExecution` handles.
+- Command cancellation and disposal request cooperative core interruption while
+  retaining `onCancel` as an optional adapter hook.
+- Command debug labels now flow into Runtime execution metadata.
+- Existing `drop`, `latest`, and `queue` state-authority semantics remain
+  unchanged; `latest` does not cancel stale work unless a future policy opts in.
+- Runtime shutdown interruption now reaches visible Command state.
+
 ## 0.1.1
 
 - Expanded the package documentation with complete bootstrap, Command,
