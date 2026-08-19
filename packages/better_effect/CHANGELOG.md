@@ -8,6 +8,13 @@
 - Resource release callbacks now receive the `Exit` that closed their Scope.
 - Module resources and `EffectContext.acquire` now share the same Scope
   acquisition lifecycle.
+- Added `Runtime.execute` and typed `EffectExecution<A, E>` handles with ids,
+  labels, logical exits, physical-running state, and cooperative interruption.
+- `Runtime.run` and `runExit` now delegate to the managed execution path.
+- Cancellation signals now expose the first reason and a cooperative
+  `throwIfCancelled` boundary.
+- Late physical defects remain observable during Runtime shutdown without
+  replacing a previously published interruption.
 
 ## 0.1.1
 
