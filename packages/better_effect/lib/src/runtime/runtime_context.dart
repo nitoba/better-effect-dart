@@ -19,12 +19,14 @@ final class _RuntimeContext {
   const _RuntimeContext({
     required this.backend,
     required this.scope,
+    required this.cancellation,
     required this.overrides,
     required this.locals,
   });
 
   final ResolverBackend backend;
   final Scope scope;
+  final CancellationSignal cancellation;
   final Map<_ServiceIdentity, Object> overrides;
   final Map<Object, Object> locals;
 
@@ -46,10 +48,14 @@ final class _RuntimeContext {
     return local.initial;
   }
 
-  _RuntimeContext _withScope(Scope childScope) {
+  _RuntimeContext _withScope(
+    Scope childScope, {
+    required CancellationSignal cancellation,
+  }) {
     return _RuntimeContext(
       backend: backend,
       scope: childScope,
+      cancellation: cancellation,
       overrides: overrides,
       locals: locals,
     );
@@ -64,6 +70,7 @@ final class _RuntimeContext {
     return _RuntimeContext(
       backend: backend,
       scope: scope,
+      cancellation: cancellation,
       overrides: <_ServiceIdentity, Object>{...overrides, identity: instance},
       locals: locals,
     );
@@ -73,6 +80,7 @@ final class _RuntimeContext {
     return _RuntimeContext(
       backend: backend,
       scope: scope,
+      cancellation: cancellation,
       overrides: overrides,
       locals: <Object, Object>{...locals, local: value},
     );

@@ -175,9 +175,10 @@ Effect<User, AppFailure> loadUser(String id) =>
     });
 ```
 
-The context is read-only. It can resolve services, compose Results and Effects,
-fail with a typed error, read locals, and acquire scoped resources. It cannot
-mutate the Module or the dependency-injection backend.
+The context is read-only. It can observe cooperative cancellation, resolve
+services, compose Results and Effects, fail with a typed error, read locals, and
+acquire scoped resources. It cannot mutate the Module or the dependency-
+injection backend.
 
 ### Propagate typed failures
 
@@ -477,12 +478,30 @@ try {
 }
 ```
 
+`close` first rejects new executions, waits for active executions to release
+their scopes, and only then closes Runtime resources and the resolver backend.
+For APIs that support cooperative cancellation, a grace period can request
+interruption without forcefully cancelling arbitrary Dart Futures:
+
+```dart
+await runtime.close(
+  gracePeriod: const Duration(seconds: 2),
+  interruptAfterGracePeriod: true,
+);
+```
+
+Inside an Effect, observe the request through `use.cancellation` and pass its
+`whenCancelled` Future to the cancellable API you are using.
+
 `runtime.services` exposes a read-only `Services` view for boundaries such as
 bootstrap code, resource composition, or integration adapters:
 
 ```dart
 final logger = runtime.services<Logger>();
 ```
+
+`runtime.state` distinguishes `RuntimeState.active`, `closing`, and `closed`;
+`isClosed` becomes true as soon as shutdown begins.
 
 Calling `run` or resolving services after `runtime.close()` raises
 `RuntimeClosedException`.
@@ -579,8 +598,9 @@ manually clean up module resources.
 - **Scopes are deterministic.** Runtime resources are released in reverse
   acquisition order; `use.acquire` resources are released when their execution
   ends.
-- **There is no general cancellation.** `parZip` and `timeout` use Dart
-  Futures, so already-running work may continue in the background.
+- **Cancellation is cooperative.** Runtime shutdown can signal
+  `CancellationSignal`, but Dart cannot forcefully cancel an arbitrary Future;
+  already-running work must cooperate with the signal.
 - **The default backend is AutoInjector.** Advanced applications can provide a
   custom `ResolverBackend` to `Module.start`, `Module.run`, or `Module.runExit`.
 - **Runtime services are scoped.** A service belongs to a Runtime; the package

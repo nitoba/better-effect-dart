@@ -2,10 +2,14 @@ part of '../../better_effect.dart';
 
 /// The capabilities available inside [Effect.result].
 ///
-/// The context is deliberately read-only: code can resolve services, compose
-/// Results and Effects, fail with a typed error, read Effect locals, and acquire
-/// scoped resources. It cannot mutate the Module or the DI backend.
+/// The context is deliberately read-only: code can observe cooperative
+/// cancellation, resolve services, compose Results and Effects, fail with a
+/// typed error, read Effect locals, and acquire scoped resources. It cannot
+/// mutate the Module or the DI backend.
 abstract interface class EffectContext<E extends Object> {
+  /// Observe cooperative cancellation requested by Runtime shutdown.
+  CancellationSignal get cancellation;
+
   /// Resolve a dependency at the point where the code uses it.
   T call<T extends Object>([ServiceKey<T>? key]);
 
@@ -50,6 +54,9 @@ final class _EffectContext<E extends Object> implements EffectContext<E> {
   const _EffectContext(this._runtime);
 
   final _RuntimeContext _runtime;
+
+  @override
+  CancellationSignal get cancellation => _runtime.cancellation;
 
   @override
   T call<T extends Object>([ServiceKey<T>? key]) {

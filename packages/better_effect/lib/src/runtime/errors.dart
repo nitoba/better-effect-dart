@@ -17,12 +17,12 @@ final class DuplicateServiceBindingException implements Exception {
   }
 }
 
-/// Thrown when an operation is attempted after a [Runtime] is closed.
+/// Thrown when an operation is attempted after a [Runtime] stops accepting work.
 final class RuntimeClosedException implements Exception {
   const RuntimeClosedException();
 
   @override
-  String toString() => 'The better_effect Runtime is already closed.';
+  String toString() => 'The better_effect Runtime is closed or closing.';
 }
 
 /// Thrown when a finalizer is added to a scope that is already closed.

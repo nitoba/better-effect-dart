@@ -1,11 +1,73 @@
 part of '../../better_effect.dart';
 
+/// Lifecycle state of a [Runtime].
+enum RuntimeState {
+  /// The Runtime accepts new Effect executions.
+  active,
+
+  /// The Runtime rejects new executions and is draining active ones.
+  closing,
+
+  /// The Runtime has released its scopes and backend.
+  closed,
+}
+
+/// A cooperative cancellation signal exposed to an active Effect.
+///
+/// A signal request does not cancel arbitrary Dart Futures. Code using a
+/// cancellable API can observe [isCancelled] or await [whenCancelled].
+final class CancellationSignal {
+  CancellationSignal._();
+
+  final Completer<void> _whenCancelled = Completer<void>.sync();
+  bool _isCancelled = false;
+
+  /// Whether cancellation has been requested.
+  bool get isCancelled => _isCancelled;
+
+  /// Completes when cancellation is requested.
+  Future<void> get whenCancelled => _whenCancelled.future;
+
+  void _cancel() {
+    if (_isCancelled) {
+      return;
+    }
+
+    _isCancelled = true;
+    _whenCancelled.complete();
+  }
+}
+
+final class _ActiveExecution {
+  _ActiveExecution(this.scope) : cancellation = CancellationSignal._();
+
+  final Scope scope;
+  final CancellationSignal cancellation;
+  final Completer<void> _completed = Completer<void>.sync();
+
+  Future<void> get completed => _completed.future;
+
+  bool get isCompleted => _completed.isCompleted;
+
+  void interrupt() => cancellation._cancel();
+
+  void complete() {
+    if (!_completed.isCompleted) {
+      _completed.complete();
+    }
+  }
+}
+
 /// Executes Effects against the environment built from a [Module].
 final class Runtime {
   Runtime._(this._rootContext);
 
   final _RuntimeContext _rootContext;
-  bool _closed = false;
+  // ponytail: tracks awaited execution Futures; detached child Futures need
+  // explicit cancellation or lease tracking if that ceiling becomes a bug.
+  final Set<_ActiveExecution> _activeExecutions = <_ActiveExecution>{};
+  RuntimeState _state = RuntimeState.active;
+  Future<void>? _closingFuture;
 
   /// Build a runtime, install constructor bindings, and acquire resources.
   static Future<Runtime> start(
@@ -17,6 +79,7 @@ final class Runtime {
     final context = _RuntimeContext(
       backend: resolver,
       scope: rootScope,
+      cancellation: CancellationSignal._(),
       overrides: const <_ServiceIdentity, Object>{},
       locals: const <Object, Object>{},
     );
@@ -85,11 +148,15 @@ final class Runtime {
 
   /// Read-only access to the runtime's services at application boundaries.
   Services get services {
-    _ensureOpen();
+    _ensureActive();
     return Services._(_rootContext);
   }
 
-  bool get isClosed => _closed;
+  /// The current lifecycle state.
+  RuntimeState get state => _state;
+
+  /// Whether this Runtime no longer accepts new work.
+  bool get isClosed => _state != RuntimeState.active;
 
   /// Run an Effect and convert unexpected defects back into thrown errors.
   Future<ResultDart<A, E>> run<A extends Object, E extends Object>(
@@ -103,10 +170,14 @@ final class Runtime {
   Future<Exit<A, E>> runExit<A extends Object, E extends Object>(
     Effect<A, E> effect,
   ) async {
-    _ensureOpen();
+    _ensureActive();
 
-    final executionScope = Scope._();
-    final context = _rootContext._withScope(executionScope);
+    final execution = _ActiveExecution(_rootContext.scope._fork());
+    _activeExecutions.add(execution);
+    final context = _rootContext._withScope(
+      execution.scope,
+      cancellation: execution.cancellation,
+    );
 
     Exit<A, E> exit;
 
@@ -121,7 +192,7 @@ final class Runtime {
     }
 
     try {
-      await executionScope._close(exit);
+      await execution.scope._close(exit);
       return exit;
     } catch (releaseError, releaseStackTrace) {
       if (exit is ExitDefect<A, E>) {
@@ -137,64 +208,143 @@ final class Runtime {
       }
 
       return ExitDefect<A, E>(releaseError, releaseStackTrace);
+    } finally {
+      _activeExecutions.remove(execution);
+      execution.complete();
     }
   }
 
   /// Close this runtime and release module-owned resources.
-  Future<void> close() {
-    return _closeWith(const ExitInterrupted<Object, Object>());
-  }
-
-  Future<void> _closeWith(Exit<Object, Object> exit) async {
-    if (_closed) {
-      return;
+  ///
+  /// Active executions are always awaited. When [interruptAfterGracePeriod]
+  /// is true, [gracePeriod] requests cooperative cancellation before waiting
+  /// for those executions to finish.
+  Future<void> close({
+    Duration gracePeriod = Duration.zero,
+    bool interruptAfterGracePeriod = false,
+  }) {
+    if (gracePeriod.isNegative) {
+      throw ArgumentError.value(
+        gracePeriod,
+        'gracePeriod',
+        'must not be negative',
+      );
     }
 
-    _closed = true;
+    return _closeWith(
+      const ExitInterrupted<Object, Object>(),
+      gracePeriod: gracePeriod,
+      interruptAfterGracePeriod: interruptAfterGracePeriod,
+    );
+  }
 
-    Object? scopeError;
-    StackTrace? scopeStackTrace;
+  Future<void> _closeWith(
+    Exit<Object, Object> exit, {
+    Duration gracePeriod = Duration.zero,
+    bool interruptAfterGracePeriod = false,
+  }) {
+    if (_state == RuntimeState.closed) {
+      return Future<void>.value();
+    }
+
+    final closingFuture = _closingFuture;
+    if (closingFuture != null) {
+      return closingFuture;
+    }
+
+    _state = RuntimeState.closing;
+    final future = _finishClose(
+      exit,
+      gracePeriod: gracePeriod,
+      interruptAfterGracePeriod: interruptAfterGracePeriod,
+    );
+    _closingFuture = future;
+    return future;
+  }
+
+  Future<void> _finishClose(
+    Exit<Object, Object> exit, {
+    required Duration gracePeriod,
+    required bool interruptAfterGracePeriod,
+  }) async {
+    Object? closeError;
+    StackTrace? closeStackTrace;
+
+    void captureError(Object error, StackTrace stackTrace) {
+      if (closeError == null) {
+        closeError = error;
+        closeStackTrace = stackTrace;
+        return;
+      }
+
+      closeError = CompositeDefect(
+        primary: closeError!,
+        primaryStackTrace: closeStackTrace!,
+        secondary: error,
+        secondaryStackTrace: stackTrace,
+      );
+    }
+
+    try {
+      await _awaitActiveExecutions(
+        gracePeriod: gracePeriod,
+        interruptAfterGracePeriod: interruptAfterGracePeriod,
+      );
+    } catch (error, stackTrace) {
+      captureError(error, stackTrace);
+    }
 
     try {
       await _rootContext.scope._close(exit);
     } catch (error, stackTrace) {
-      scopeError = error;
-      scopeStackTrace = stackTrace;
+      captureError(error, stackTrace);
     }
-
-    Object? backendError;
-    StackTrace? backendStackTrace;
 
     try {
       await Future<void>.sync(_rootContext.backend.close);
     } catch (error, stackTrace) {
-      backendError = error;
-      backendStackTrace = stackTrace;
+      captureError(error, stackTrace);
     }
 
-    if (scopeError != null && backendError != null) {
-      Error.throwWithStackTrace(
-        CompositeDefect(
-          primary: scopeError,
-          primaryStackTrace: scopeStackTrace!,
-          secondary: backendError,
-          secondaryStackTrace: backendStackTrace!,
-        ),
-        scopeStackTrace,
-      );
-    }
+    _state = RuntimeState.closed;
 
-    if (scopeError != null) {
-      Error.throwWithStackTrace(scopeError, scopeStackTrace!);
-    }
-
-    if (backendError != null) {
-      Error.throwWithStackTrace(backendError, backendStackTrace!);
+    final error = closeError;
+    if (error != null) {
+      Error.throwWithStackTrace(error, closeStackTrace!);
     }
   }
 
-  void _ensureOpen() {
-    if (_closed) {
+  Future<void> _awaitActiveExecutions({
+    required Duration gracePeriod,
+    required bool interruptAfterGracePeriod,
+  }) async {
+    final executions = List<_ActiveExecution>.of(_activeExecutions);
+    if (executions.isEmpty) {
+      return;
+    }
+
+    final allCompleted = Future.wait<void>(
+      executions.map((execution) => execution.completed),
+    );
+
+    if (interruptAfterGracePeriod) {
+      await Future.any<void>(<Future<void>>[
+        allCompleted,
+        Future<void>.delayed(gracePeriod),
+      ]);
+
+      for (final execution in executions) {
+        if (!execution.isCompleted) {
+          execution.interrupt();
+        }
+      }
+    }
+
+    await allCompleted;
+  }
+
+  void _ensureActive() {
+    if (_state != RuntimeState.active) {
       throw const RuntimeClosedException();
     }
   }
