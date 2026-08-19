@@ -33,7 +33,9 @@ final class HomeViewModel extends EffectViewModel {
 ''';
 
     final offset = source.indexOf('use<HomeApiClient>()');
-    await assertDiagnostics(source, [lint(offset, 'use<HomeApiClient>()'.length)]);
+    await assertDiagnostics(source, [
+      lint(offset, 'use<HomeApiClient>()'.length),
+    ]);
   }
 
   Future<void> test_reportsDotShorthandStaticServiceRequest() async {
@@ -48,7 +50,9 @@ final class HomeViewModel extends EffectViewModel {
 ''';
 
     final offset = source.indexOf('.service<HomeApiClient>()');
-    await assertDiagnostics(source, [lint(offset, '.service<HomeApiClient>()'.length)]);
+    await assertDiagnostics(source, [
+      lint(offset, '.service<HomeApiClient>()'.length),
+    ]);
   }
 
   Future<void> test_allowsRepositoryRequest() async {

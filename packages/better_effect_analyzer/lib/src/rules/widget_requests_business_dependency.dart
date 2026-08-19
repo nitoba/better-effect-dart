@@ -11,7 +11,7 @@ import '../support/type_utils.dart';
 /// directly through BuildContext.
 final class WidgetRequestsBusinessDependencyRule extends AnalysisRule {
   WidgetRequestsBusinessDependencyRule()
-      : super(name: code.name, description: code.problemMessage);
+    : super(name: code.name, description: code.problemMessage);
 
   static const code = LintCode(
     'widget_requests_business_dependency',

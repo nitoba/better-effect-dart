@@ -12,7 +12,7 @@ import '../support/type_utils.dart';
 /// low-level infrastructure services.
 final class ViewModelRequestsServiceRule extends AnalysisRule {
   ViewModelRequestsServiceRule()
-      : super(name: code.name, description: code.problemMessage);
+    : super(name: code.name, description: code.problemMessage);
 
   static const code = LintCode(
     'viewmodel_requests_service',

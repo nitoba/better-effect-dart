@@ -30,10 +30,9 @@ final module = Module([
 ''';
 
     final offset = source.indexOf('AnalyticsService.new');
-    await assertDiagnostics(
-      source,
-      [lint(offset, 'AnalyticsService.new'.length)],
-    );
+    await assertDiagnostics(source, [
+      lint(offset, 'AnalyticsService.new'.length),
+    ]);
   }
 
   Future<void> test_allowsCompatibleConstructor() async {

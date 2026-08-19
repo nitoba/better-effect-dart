@@ -13,11 +13,7 @@ import '../support/invocation.dart';
 import '../support/type_utils.dart';
 
 /// Severity used by project-wide graph diagnostics.
-enum GraphDiagnosticSeverity {
-  info,
-  warning,
-  error,
-}
+enum GraphDiagnosticSeverity { info, warning, error }
 
 /// A project-wide better_effect graph diagnostic.
 final class GraphDiagnostic implements Comparable<GraphDiagnostic> {
@@ -40,14 +36,14 @@ final class GraphDiagnostic implements Comparable<GraphDiagnostic> {
   final GraphDiagnosticSeverity severity;
 
   Map<String, Object> toJson() => <String, Object>{
-        'code': code,
-        'message': message,
-        'path': path,
-        'line': line,
-        'column': column,
-        'length': length,
-        'severity': severity.name,
-      };
+    'code': code,
+    'message': message,
+    'path': path,
+    'line': line,
+    'column': column,
+    'length': length,
+    'severity': severity.name,
+  };
 
   String toMachine() {
     return '$path:$line:$column:${severity.name}:$code:$message';
@@ -94,21 +90,19 @@ final class GraphCheckOptions {
 /// Result returned by [BetterEffectGraphChecker.check].
 final class GraphCheckResult {
   GraphCheckResult(Iterable<GraphDiagnostic> diagnostics)
-      : diagnostics = List<GraphDiagnostic>.unmodifiable(
-          diagnostics.toList()..sort(),
-        );
+    : diagnostics = List<GraphDiagnostic>.unmodifiable(
+        diagnostics.toList()..sort(),
+      );
 
   final List<GraphDiagnostic> diagnostics;
 
   bool get hasErrors => diagnostics.any(
-        (diagnostic) =>
-            diagnostic.severity == GraphDiagnosticSeverity.error,
-      );
+    (diagnostic) => diagnostic.severity == GraphDiagnosticSeverity.error,
+  );
 
   bool get hasWarnings => diagnostics.any(
-        (diagnostic) =>
-            diagnostic.severity == GraphDiagnosticSeverity.warning,
-      );
+    (diagnostic) => diagnostic.severity == GraphDiagnosticSeverity.warning,
+  );
 
   String toJson({bool pretty = true}) {
     final encoder = pretty
@@ -119,19 +113,13 @@ final class GraphCheckResult {
       'diagnostics': diagnostics.map((item) => item.toJson()).toList(),
       'summary': <String, Object>{
         'errors': diagnostics
-            .where(
-              (item) => item.severity == GraphDiagnosticSeverity.error,
-            )
+            .where((item) => item.severity == GraphDiagnosticSeverity.error)
             .length,
         'warnings': diagnostics
-            .where(
-              (item) => item.severity == GraphDiagnosticSeverity.warning,
-            )
+            .where((item) => item.severity == GraphDiagnosticSeverity.warning)
             .length,
         'infos': diagnostics
-            .where(
-              (item) => item.severity == GraphDiagnosticSeverity.info,
-            )
+            .where((item) => item.severity == GraphDiagnosticSeverity.info)
             .length,
       },
     });
@@ -145,7 +133,7 @@ final class GraphCheckResult {
 /// often declared in different libraries.
 final class BetterEffectGraphChecker {
   BetterEffectGraphChecker(String rootPath)
-      : rootPath = p.normalize(p.absolute(rootPath));
+    : rootPath = p.normalize(p.absolute(rootPath));
 
   final String rootPath;
 
@@ -173,9 +161,7 @@ final class BetterEffectGraphChecker {
       return GraphCheckResult(const <GraphDiagnostic>[]);
     }
 
-    final collection = AnalysisContextCollection(
-      includedPaths: includedPaths,
-    );
+    final collection = AnalysisContextCollection(includedPaths: includedPaths);
     final index = _ProjectIndex(rootPath);
 
     try {
@@ -192,9 +178,7 @@ final class BetterEffectGraphChecker {
         }
       }
 
-      return GraphCheckResult(
-        index.validate(moduleNames: options.moduleNames),
-      );
+      return GraphCheckResult(index.validate(moduleNames: options.moduleNames));
     } finally {
       await collection.dispose();
     }
@@ -223,11 +207,14 @@ final class _ProjectIndex {
 
   Iterable<GraphDiagnostic> validate({required Set<String> moduleNames}) sync* {
     if (moduleNames.isNotEmpty) {
-      final availableNames = modules.values.map((module) => module.name).toSet();
+      final availableNames = modules.values
+          .map((module) => module.name)
+          .toSet();
       for (final requestedName in moduleNames.difference(availableNames)) {
         yield _diagnostic(
           code: 'module_not_found',
-          message: "No Module named '$requestedName' was found in the analyzed project.",
+          message:
+              "No Module named '$requestedName' was found in the analyzed project.",
           location: _SourceLocation(
             path: p.join(rootPath, 'pubspec.yaml'),
             line: 1,
@@ -379,10 +366,7 @@ final class _ProjectIndex {
       for (final dependency in dependenciesOf(provider)) {
         if (state[dependency] == 1) {
           final start = stack.indexOf(dependency);
-          final cycle = <String>[
-            ...stack.sublist(start),
-            dependency,
-          ];
+          final cycle = <String>[...stack.sublist(start), dependency];
           final signature = cycle.join(' -> ');
 
           if (emitted.add(signature)) {
@@ -392,8 +376,7 @@ final class _ProjectIndex {
 
             yield _diagnostic(
               code: 'dependency_cycle',
-              message:
-                  "Dependency cycle in Module '${root.name}': $names.",
+              message: "Dependency cycle in Module '${root.name}': $names.",
               location: provider.location,
             );
           }
@@ -622,26 +605,21 @@ final class _UnitCollector extends RecursiveAstVisitor<void> {
     if (binding.name == 'resource') {
       final acquire = binding.namedArgument('acquire');
       if (acquire != null) {
-        final collector = _InlineDependencyCollector(
-          (node, request) {
-            inlineDependencies.add(
-              _ServiceRef.fromType(
-                request.serviceType,
-                keyId: request.keyId,
-                location: _location(node.offset, node.length),
-              ),
-            );
-          },
-        );
+        final collector = _InlineDependencyCollector((node, request) {
+          inlineDependencies.add(
+            _ServiceRef.fromType(
+              request.serviceType,
+              keyId: request.keyId,
+              location: _location(node.offset, node.length),
+            ),
+          );
+        });
         acquire.accept(collector);
       }
     }
 
     return _ProviderInfo(
-      service: _ServiceRef.fromType(
-        serviceType,
-        keyId: binding.keyId,
-      ),
+      service: _ServiceRef.fromType(serviceType, keyId: binding.keyId),
       implementation: implementationType == null
           ? null
           : _ServiceRef.fromType(implementationType),

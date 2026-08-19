@@ -12,7 +12,7 @@ import '../support/type_utils.dart';
 /// Object because the constructor parameter is intentionally typed Function.
 final class MissingBindingTypeArgumentRule extends AnalysisRule {
   MissingBindingTypeArgumentRule()
-      : super(name: code.name, description: code.problemMessage);
+    : super(name: code.name, description: code.problemMessage);
 
   static const code = LintCode(
     'missing_binding_type_argument',

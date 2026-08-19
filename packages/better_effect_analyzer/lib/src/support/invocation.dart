@@ -172,9 +172,11 @@ ServiceRequest? serviceRequestFromNode(AstNode node) {
     if (types == null || types.isEmpty) return null;
 
     final element = node.element;
-    final receiverIsContext = isEffectContextType(node.function.staticType) ||
+    final receiverIsContext =
+        isEffectContextType(node.function.staticType) ||
         isServicesType(node.function.staticType);
-    final elementIsContextCall = element?.name == 'call' &&
+    final elementIsContextCall =
+        element?.name == 'call' &&
         (element?.enclosingElement?.name == 'EffectContext' ||
             element?.enclosingElement?.name == 'Services') &&
         elementLibraryUri(element) == betterEffectLibraryUri;
@@ -210,8 +212,8 @@ ServiceRequest? serviceRequestFromNode(AstNode node) {
     final element = node.methodName.element;
     final targetType = node.target?.staticType;
 
-    final isContextService = name == 'service' &&
-        isEffectContextType(targetType);
+    final isContextService =
+        name == 'service' && isEffectContextType(targetType);
     final isServicesGet = name == 'get' && isServicesType(targetType);
     final isStaticService = isStaticEffectService(element);
 
@@ -256,13 +258,18 @@ EffectContextOperation? effectContextOperationFromExpression(
   if (expression is! MethodInvocation) return null;
 
   final name = expression.methodName.name;
-  if (!const <String>{'unwrap', 'result', 'tryAsync', 'acquire'}
-      .contains(name)) {
+  if (!const <String>{
+    'unwrap',
+    'result',
+    'tryAsync',
+    'acquire',
+  }.contains(name)) {
     return null;
   }
 
   final element = expression.methodName.element;
-  final isContext = isEffectContextType(expression.target?.staticType) ||
+  final isContext =
+      isEffectContextType(expression.target?.staticType) ||
       (element?.enclosingElement?.name == 'EffectContext' &&
           elementLibraryUri(element) == betterEffectLibraryUri);
 

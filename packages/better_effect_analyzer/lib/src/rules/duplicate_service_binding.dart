@@ -11,7 +11,7 @@ import '../support/type_utils.dart';
 /// Reports duplicate service identities in a directly declared Module literal.
 final class DuplicateServiceBindingRule extends AnalysisRule {
   DuplicateServiceBindingRule()
-      : super(name: code.name, description: code.problemMessage);
+    : super(name: code.name, description: code.problemMessage);
 
   static const code = LintCode(
     'duplicate_service_binding',
@@ -55,10 +55,7 @@ final class _Visitor extends SimpleAstVisitor<void> {
 
       final identity = '${typeIdentity(serviceType)}::${call.keyId}';
       if (!identities.add(identity)) {
-        rule.reportAtNode(
-          call.nameNode,
-          arguments: [typeDisplay(serviceType)],
-        );
+        rule.reportAtNode(call.nameNode, arguments: [typeDisplay(serviceType)]);
       }
     }
   }

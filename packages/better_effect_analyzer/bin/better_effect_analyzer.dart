@@ -5,12 +5,7 @@ import 'package:better_effect_analyzer/better_effect_analyzer.dart';
 
 Future<void> main(List<String> arguments) async {
   final parser = ArgParser()
-    ..addFlag(
-      'help',
-      abbr: 'h',
-      negatable: false,
-      help: 'Show command usage.',
-    )
+    ..addFlag('help', abbr: 'h', negatable: false, help: 'Show command usage.')
     ..addFlag(
       'include-tests',
       negatable: false,
@@ -19,8 +14,7 @@ Future<void> main(List<String> arguments) async {
     ..addMultiOption(
       'module',
       abbr: 'm',
-      help:
-          'Check only the named root Module. Repeat for multiple Modules.',
+      help: 'Check only the named root Module. Repeat for multiple Modules.',
       valueHelp: 'name',
     )
     ..addOption(
@@ -133,5 +127,6 @@ Usage:
 
 Options:
 ${parser.usage}
-'''.trim();
+'''
+      .trim();
 }

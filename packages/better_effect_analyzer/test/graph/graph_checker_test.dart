@@ -38,33 +38,36 @@ void main() {
         contains('missing_service'),
       );
       expect(
-        result.diagnostics.singleWhere(
-          (diagnostic) => diagnostic.code == 'missing_service',
-        ).message,
+        result.diagnostics
+            .singleWhere((diagnostic) => diagnostic.code == 'missing_service')
+            .message,
         contains("requires 'Database'"),
       );
     });
 
-    test('reports an explicitly requested Module that does not exist', () async {
-      _writeAppSource(
-        app,
-        moduleBindings: '''
+    test(
+      'reports an explicitly requested Module that does not exist',
+      () async {
+        _writeAppSource(
+          app,
+          moduleBindings: '''
   .provide<Database>(DatabaseLive.new),
   .provide<UserRepository>(UserRepositoryLive.new),
 ''',
-      );
+        );
 
-      final result = await BetterEffectGraphChecker(app.path).check(
-        options: const GraphCheckOptions(
-          moduleNames: <String>{'backgroundModule'},
-        ),
-      );
+        final result = await BetterEffectGraphChecker(app.path).check(
+          options: const GraphCheckOptions(
+            moduleNames: <String>{'backgroundModule'},
+          ),
+        );
 
-      expect(
-        result.diagnostics.map((diagnostic) => diagnostic.code),
-        contains('module_not_found'),
-      );
-    });
+        expect(
+          result.diagnostics.map((diagnostic) => diagnostic.code),
+          contains('module_not_found'),
+        );
+      },
+    );
 
     test('accepts a complete root Module', () async {
       _writeAppSource(
@@ -111,9 +114,9 @@ dependencies:
     ],
   };
 
-  File(p.join(dartTool.path, 'package_config.json')).writeAsStringSync(
-    const JsonEncoder.withIndent('  ').convert(config),
-  );
+  File(
+    p.join(dartTool.path, 'package_config.json'),
+  ).writeAsStringSync(const JsonEncoder.withIndent('  ').convert(config));
 }
 
 void _writeBetterEffectStub(Directory sandbox) {
@@ -182,10 +185,7 @@ final class Module {
 ''');
 }
 
-void _writeAppSource(
-  Directory app, {
-  required String moduleBindings,
-}) {
+void _writeAppSource(Directory app, {required String moduleBindings}) {
   final source = File(p.join(app.path, 'lib', 'app.dart'))
     ..parent.createSync(recursive: true);
 

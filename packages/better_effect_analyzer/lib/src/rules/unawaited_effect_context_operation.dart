@@ -11,7 +11,7 @@ import '../support/invocation.dart';
 /// accidentally ignored.
 final class UnawaitedEffectContextOperationRule extends AnalysisRule {
   UnawaitedEffectContextOperationRule()
-      : super(name: code.name, description: code.problemMessage);
+    : super(name: code.name, description: code.problemMessage);
 
   static const code = LintCode(
     'unawaited_effect_context_operation',

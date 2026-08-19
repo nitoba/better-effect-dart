@@ -38,19 +38,11 @@ String? baseTypeElementIdentity(DartType? type) {
   return elementIdentity(type?.element);
 }
 
-bool isElementFromLibrary(
-  Element? element,
-  String name,
-  String libraryUri,
-) {
+bool isElementFromLibrary(Element? element, String name, String libraryUri) {
   return element?.name == name && elementLibraryUri(element) == libraryUri;
 }
 
-bool isTypeFromLibrary(
-  DartType? type,
-  String name,
-  String libraryUri,
-) {
+bool isTypeFromLibrary(DartType? type, String name, String libraryUri) {
   return isElementFromLibrary(type?.element, name, libraryUri);
 }
 
@@ -59,16 +51,11 @@ Iterable<InterfaceType> interfaceHierarchy(InterfaceType type) sync* {
   yield* type.element.allSupertypes;
 }
 
-bool hierarchyContains(
-  DartType? type,
-  String name,
-  String libraryUri,
-) {
+bool hierarchyContains(DartType? type, String name, String libraryUri) {
   if (type is! InterfaceType) return false;
 
   return interfaceHierarchy(type).any(
-    (candidate) =>
-        isElementFromLibrary(candidate.element, name, libraryUri),
+    (candidate) => isElementFromLibrary(candidate.element, name, libraryUri),
   );
 }
 
@@ -77,11 +64,7 @@ bool isEffectType(DartType? type) {
 }
 
 bool isEffectContextType(DartType? type) {
-  return hierarchyContains(
-    type,
-    'EffectContext',
-    betterEffectLibraryUri,
-  );
+  return hierarchyContains(type, 'EffectContext', betterEffectLibraryUri);
 }
 
 bool isServicesType(DartType? type) {
@@ -96,7 +79,6 @@ bool isBindingMember(Element? element) {
   return element?.enclosingElement?.name == 'Binding' &&
       elementLibraryUri(element) == betterEffectLibraryUri;
 }
-
 
 bool isUninformativeBindingServiceType(DartType? type) {
   if (type == null || type is DynamicType) return true;
@@ -115,8 +97,7 @@ bool isBuildContextType(DartType? type) {
   return interfaceHierarchy(type).any((candidate) {
     final element = candidate.element;
     final uri = element.library.uri.toString();
-    return element.name == 'BuildContext' &&
-        uri.startsWith('package:flutter/');
+    return element.name == 'BuildContext' && uri.startsWith('package:flutter/');
   });
 }
 
@@ -148,19 +129,17 @@ bool isRepositoryType(DartType? type) {
   return name != null && isRepositoryName(name);
 }
 
-
 bool typeImplements(DartType? type, DartType? contract) {
   if (type is! InterfaceType || contract is! InterfaceType) return false;
   final contractElement = contract.element;
-  return interfaceHierarchy(type).any(
-    (candidate) => candidate.element == contractElement,
-  );
+  return interfaceHierarchy(
+    type,
+  ).any((candidate) => candidate.element == contractElement);
 }
 
 bool isViewModelType(DartType? type) {
   final name = type?.element?.name;
-  return isEffectViewModelType(type) ||
-      (name != null && isViewModelName(name));
+  return isEffectViewModelType(type) || (name != null && isViewModelName(name));
 }
 
 bool isLowLevelServiceType(DartType? type) {

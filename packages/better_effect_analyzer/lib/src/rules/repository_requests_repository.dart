@@ -11,7 +11,7 @@ import '../support/type_utils.dart';
 /// Keeps repository-to-repository orchestration in a UseCase or ViewModel.
 final class RepositoryRequestsRepositoryRule extends AnalysisRule {
   RepositoryRequestsRepositoryRule()
-      : super(name: code.name, description: code.problemMessage);
+    : super(name: code.name, description: code.problemMessage);
 
   static const code = LintCode(
     'repository_requests_repository',
@@ -68,12 +68,9 @@ final class _Visitor extends SimpleAstVisitor<void> {
     if (typeImplements(ownerType, request.serviceType)) return;
 
     final ownerName = classNameOf(owner);
-    final requestedName = request.serviceType.element?.name ??
-        typeDisplay(request.serviceType);
+    final requestedName =
+        request.serviceType.element?.name ?? typeDisplay(request.serviceType);
 
-    rule.reportAtNode(
-      request.node,
-      arguments: [ownerName, requestedName],
-    );
+    rule.reportAtNode(request.node, arguments: [ownerName, requestedName]);
   }
 }
