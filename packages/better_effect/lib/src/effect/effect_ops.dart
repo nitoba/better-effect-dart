@@ -103,9 +103,7 @@ extension EffectTransformOps<A extends Object, E extends Object>
       return source.timeout(
         duration,
         onTimeout: () {
-          context._trackPhysical(
-            source.then<void>((_) {}, onError: (Object _, StackTrace _) {}),
-          );
+          context._trackPhysical(source.then<void>((_) {}));
           return Failure<A, E>(onTimeout());
         },
       );

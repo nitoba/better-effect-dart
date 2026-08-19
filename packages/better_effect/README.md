@@ -531,6 +531,29 @@ switch (exit) {
 a cleanup failure. `ExitInterrupted` is used when a Runtime is closed without a
 successful or expected-failure result.
 
+### Observe cleanup failures
+
+Cleanup failures are reported separately so they do not hide a typed failure
+or an interruption. Configure an observer when starting a Runtime (or through
+`Module.run`/`runExit`):
+
+```dart
+final runtime = await appModule.start(
+  cleanupFailureObserver: (diagnostic) {
+    logCleanup(
+      diagnostic.executionId,
+      diagnostic.executionLabel,
+      diagnostic.error,
+    );
+  },
+);
+```
+
+The observer is best-effort: exceptions raised by it are ignored. A successful
+Effect becomes an `ExitDefect` when its cleanup fails; typed failures,
+defects, and interruptions keep their primary outcome. `executionId` starts at
+one for Effect executions; zero identifies Runtime-level cleanup.
+
 ## Per-execution context with `EffectLocal`
 
 `EffectLocal<T>` is a typed value inherited by nested Effects. It is useful for

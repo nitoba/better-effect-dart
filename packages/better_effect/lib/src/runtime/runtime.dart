@@ -39,9 +39,12 @@ final class CancellationSignal {
 }
 
 final class _ActiveExecution {
-  _ActiveExecution(this.scope) : cancellation = CancellationSignal._();
+  _ActiveExecution({required this.id, required this.scope, required this.label})
+    : cancellation = CancellationSignal._();
 
+  final int id;
   final Scope scope;
+  final String? label;
   final CancellationSignal cancellation;
   final Completer<void> _completed = Completer<void>.sync();
 
@@ -60,13 +63,15 @@ final class _ActiveExecution {
 
 /// Executes Effects against the environment built from a [Module].
 final class Runtime {
-  Runtime._(this._rootContext);
+  Runtime._(this._rootContext, this._cleanupFailureObserver);
 
   final _RuntimeContext _rootContext;
+  final CleanupFailureObserver? _cleanupFailureObserver;
   // ponytail: tracks awaited execution Futures; detached child Futures need
   // explicit cancellation or lease tracking if that ceiling becomes a bug.
   final Set<_ActiveExecution> _activeExecutions = <_ActiveExecution>{};
   final List<ReleaseFailure> _deferredExecutionFailures = <ReleaseFailure>[];
+  int _nextExecutionId = 0;
   RuntimeState _state = RuntimeState.active;
   Future<void>? _closingFuture;
 
@@ -74,6 +79,7 @@ final class Runtime {
   static Future<Runtime> start(
     Module module, {
     ResolverBackend? backend,
+    CleanupFailureObserver? cleanupFailureObserver,
   }) async {
     final resolver = backend ?? AutoInjectorBackend();
     final rootScope = Scope._();
@@ -102,14 +108,23 @@ final class Runtime {
 
       await Future<void>.sync(resolver.activate);
 
-      return Runtime._(context);
+      return Runtime._(context, cleanupFailureObserver);
     } catch (error, stackTrace) {
+      final outcome = ExitDefect<Object, Object>(error, stackTrace);
       Object? cleanupError;
       StackTrace? cleanupStackTrace;
 
       try {
-        await rootScope._close(ExitDefect<Object, Object>(error, stackTrace));
+        await rootScope._close(outcome);
       } catch (releaseError, releaseStack) {
+        await _notifyCleanupFailureBestEffort(
+          cleanupFailureObserver,
+          CleanupFailureDiagnostic(
+            outcome: outcome,
+            error: _asScopeReleaseException(releaseError, releaseStack),
+            executionId: 0,
+          ),
+        );
         cleanupError = releaseError;
         cleanupStackTrace = releaseStack;
       }
@@ -161,19 +176,25 @@ final class Runtime {
 
   /// Run an Effect and convert unexpected defects back into thrown errors.
   Future<ResultDart<A, E>> run<A extends Object, E extends Object>(
-    Effect<A, E> effect,
-  ) async {
-    final exit = await runExit(effect);
+    Effect<A, E> effect, {
+    String? executionLabel,
+  }) async {
+    final exit = await runExit(effect, executionLabel: executionLabel);
     return _resultFromExit(exit);
   }
 
   /// Run an Effect while preserving success, failure, and defects in [Exit].
   Future<Exit<A, E>> runExit<A extends Object, E extends Object>(
-    Effect<A, E> effect,
-  ) {
+    Effect<A, E> effect, {
+    String? executionLabel,
+  }) {
     _ensureActive();
 
-    final execution = _ActiveExecution(_rootContext.scope._fork());
+    final execution = _ActiveExecution(
+      id: ++_nextExecutionId,
+      scope: _rootContext.scope._fork(),
+      label: executionLabel,
+    );
     _activeExecutions.add(execution);
     final context = _rootContext._withScope(
       execution.scope,
@@ -213,10 +234,17 @@ final class Runtime {
         try {
           await execution.scope._close(exit);
         } catch (error, stackTrace) {
+          await _reportCleanupFailure(
+            _asScopeReleaseException(error, stackTrace),
+            exit,
+            execution: execution,
+          );
           _recordDeferredExecutionFailure(error, stackTrace);
         }
       } else {
-        logicalExit.complete(await _closeExecutionScope(execution.scope, exit));
+        logicalExit.complete(
+          await _closeExecutionScope(execution.scope, exit, execution),
+        );
       }
     } catch (error, stackTrace) {
       if (logicalExit.isCompleted) {
@@ -233,11 +261,22 @@ final class Runtime {
   Future<Exit<A, E>> _closeExecutionScope<A extends Object, E extends Object>(
     Scope scope,
     Exit<A, E> exit,
+    _ActiveExecution execution,
   ) async {
     try {
       await scope._close(exit);
       return exit;
     } catch (releaseError, releaseStackTrace) {
+      await _reportCleanupFailure(
+        _asScopeReleaseException(releaseError, releaseStackTrace),
+        exit,
+        execution: execution,
+      );
+
+      if (exit is ExitSuccess<A, E>) {
+        return ExitDefect<A, E>(releaseError, releaseStackTrace);
+      }
+
       if (exit is ExitDefect<A, E>) {
         return ExitDefect<A, E>(
           CompositeDefect(
@@ -250,8 +289,24 @@ final class Runtime {
         );
       }
 
-      return ExitDefect<A, E>(releaseError, releaseStackTrace);
+      return exit;
     }
+  }
+
+  Future<void> _reportCleanupFailure(
+    ScopeReleaseException error,
+    Exit<Object, Object> outcome, {
+    required _ActiveExecution execution,
+  }) {
+    return _notifyCleanupFailureBestEffort(
+      _cleanupFailureObserver,
+      CleanupFailureDiagnostic(
+        outcome: outcome,
+        error: error,
+        executionId: execution.id,
+        executionLabel: execution.label,
+      ),
+    );
   }
 
   void _recordDeferredExecutionFailure(Object error, StackTrace stackTrace) {
@@ -347,6 +402,14 @@ final class Runtime {
     try {
       await _rootContext.scope._close(exit);
     } catch (error, stackTrace) {
+      await _notifyCleanupFailureBestEffort(
+        _cleanupFailureObserver,
+        CleanupFailureDiagnostic(
+          outcome: exit,
+          error: _asScopeReleaseException(error, stackTrace),
+          executionId: 0,
+        ),
+      );
       captureError(error, stackTrace);
     }
 
@@ -397,5 +460,33 @@ final class Runtime {
     if (_state != RuntimeState.active) {
       throw const RuntimeClosedException();
     }
+  }
+}
+
+ScopeReleaseException _asScopeReleaseException(
+  Object error,
+  StackTrace stackTrace,
+) {
+  if (error is ScopeReleaseException) {
+    return error;
+  }
+
+  return ScopeReleaseException(<ReleaseFailure>[
+    (error: error, stackTrace: stackTrace),
+  ]);
+}
+
+Future<void> _notifyCleanupFailureBestEffort(
+  CleanupFailureObserver? observer,
+  CleanupFailureDiagnostic diagnostic,
+) async {
+  if (observer == null) {
+    return;
+  }
+
+  try {
+    await Future<void>.sync(() => observer(diagnostic));
+  } catch (_) {
+    // Observers are diagnostics only and must not affect the Effect outcome.
   }
 }

@@ -10,6 +10,7 @@ final class Scope {
   final List<_ScopeFinalizer> _finalizers = <_ScopeFinalizer>[];
   final Set<Scope> _children = <Scope>{};
   final Set<Future<void>> _physicalOperations = <Future<void>>{};
+  final List<ReleaseFailure> _physicalFailures = <ReleaseFailure>[];
   bool _closed = false;
   Future<void>? _closingFuture;
   Exit<Object, Object>? _closingExit;
@@ -83,7 +84,11 @@ final class Scope {
       (_) {
         completion.complete();
       },
-      onError: (Object _, StackTrace _) {
+      onError: (Object error, StackTrace stackTrace) {
+        // A late acquire can observe shutdown after releasing successfully.
+        if (error is! ScopeClosedException) {
+          _physicalFailures.add((error: error, stackTrace: stackTrace));
+        }
         completion.complete();
       },
     );
@@ -126,6 +131,8 @@ final class Scope {
 
     try {
       await _awaitPhysical();
+      failures.addAll(_physicalFailures);
+      _physicalFailures.clear();
 
       for (final finalizer in _finalizers.reversed) {
         try {

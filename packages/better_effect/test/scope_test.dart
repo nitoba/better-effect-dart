@@ -9,6 +9,14 @@ final class Resource {
   final String name;
 }
 
+final class CleanupError implements Exception {
+  const CleanupError();
+}
+
+final class AuthenticationFailure implements Exception {
+  const AuthenticationFailure();
+}
+
 void main() {
   test('module resources are released in reverse acquisition order', () async {
     final events = <String>[];
@@ -72,6 +80,119 @@ void main() {
       await runtime.close();
     }
   });
+
+  test('cleanup failure preserves typed execution failure', () async {
+    final diagnostics = <CleanupFailureDiagnostic>[];
+    final runtime = await Module(const <Binding>[]).start(
+      cleanupFailureObserver: (diagnostic) {
+        diagnostics.add(diagnostic);
+        throw StateError('observer failed');
+      },
+    );
+
+    try {
+      final exit = await runtime.runExit(
+        Effect<String, AuthenticationFailure>.result((use) async {
+          await use.acquire(
+            Effect<Resource, AuthenticationFailure>.succeed(
+              const Resource('execution'),
+            ),
+            release: (_) => throw const CleanupError(),
+          );
+          use.fail(const AuthenticationFailure());
+        }),
+        executionLabel: 'authenticate',
+      );
+
+      expect(exit, isA<ExitFailure<String, AuthenticationFailure>>());
+      expect(diagnostics, hasLength(1));
+      expect(diagnostics.single.outcome, same(exit));
+      expect(diagnostics.single.error, isA<ScopeReleaseException>());
+      expect(diagnostics.single.executionId, 1);
+      expect(diagnostics.single.executionLabel, 'authenticate');
+    } finally {
+      await runtime.close();
+    }
+  });
+
+  test('cleanup failure turns execution success into a defect', () async {
+    final diagnostics = <CleanupFailureDiagnostic>[];
+    final runtime = await Module(
+      const <Binding>[],
+    ).start(cleanupFailureObserver: diagnostics.add);
+
+    try {
+      final exit = await runtime.runExit(
+        Effect<String, Never>.result((use) async {
+          return (await use.acquire(
+            Effect<Resource, Never>.succeed(const Resource('execution')),
+            release: (_) => throw const CleanupError(),
+          )).name;
+        }),
+      );
+
+      expect(exit, isA<ExitDefect<String, Never>>());
+      expect(diagnostics, hasLength(1));
+      expect(diagnostics.single.outcome, isA<ExitSuccess<String, Never>>());
+      expect(diagnostics.single.executionId, 1);
+    } finally {
+      await runtime.close();
+    }
+  });
+
+  test('cleanup failure is aggregated after an execution defect', () async {
+    final diagnostics = <CleanupFailureDiagnostic>[];
+    final runtime = await Module(
+      const <Binding>[],
+    ).start(cleanupFailureObserver: diagnostics.add);
+
+    try {
+      final exit = await runtime.runExit(
+        Effect<String, Never>.result((use) async {
+          await use.acquire(
+            Effect<Resource, Never>.succeed(const Resource('execution')),
+            release: (_) => throw const CleanupError(),
+          );
+          throw const AuthenticationFailure();
+        }),
+      );
+
+      expect(exit, isA<ExitDefect<String, Never>>());
+      expect(
+        (exit as ExitDefect<String, Never>).defect,
+        isA<CompositeDefect>(),
+      );
+      expect(diagnostics, hasLength(1));
+      expect(diagnostics.single.outcome, isA<ExitDefect<String, Never>>());
+    } finally {
+      await runtime.close();
+    }
+  });
+
+  test(
+    'Module.runExit preserves typed failure when runtime cleanup fails',
+    () async {
+      final diagnostics = <CleanupFailureDiagnostic>[];
+      final exit =
+          await Module([
+            .resource<Resource>(
+              acquire: (_) async => const Resource('runtime'),
+              release: (_) => throw const CleanupError(),
+            ),
+          ]).runExit(
+            Effect<String, AuthenticationFailure>.fail(
+              const AuthenticationFailure(),
+            ),
+            cleanupFailureObserver: diagnostics.add,
+          );
+
+      expect(exit, isA<ExitFailure<String, AuthenticationFailure>>());
+      expect(diagnostics, hasLength(1));
+      expect(diagnostics.single.outcome, same(exit));
+      expect(diagnostics.single.executionId, 0);
+      expect(diagnostics.single.executionLabel, isNull);
+    },
+  );
 
   test(
     'Runtime.close drains active executions before module resources',
@@ -257,6 +378,40 @@ void main() {
       expect(released, isTrue);
     },
   );
+
+  test('timeout cleanup failure does not replace its typed outcome', () async {
+    final acquisitionStarted = Completer<void>();
+    final continueAcquisition = Completer<void>();
+    final diagnostics = <CleanupFailureDiagnostic>[];
+
+    final runtime = await Module(
+      const <Binding>[],
+    ).start(cleanupFailureObserver: diagnostics.add);
+    final running = runtime.runExit(
+      Effect<String, String>.result((use) async {
+        final resource = await use.acquire(
+          Effect<Resource, String>.result((_) async {
+            acquisitionStarted.complete();
+            await continueAcquisition.future;
+            return const Resource('late');
+          }),
+          release: (_) => throw const CleanupError(),
+        );
+
+        return resource.name;
+      }).timeout(Duration.zero, onTimeout: () => 'timeout'),
+    );
+
+    await acquisitionStarted.future;
+    final exit = await running;
+    expect(exit, isA<ExitFailure<String, String>>());
+
+    continueAcquisition.complete();
+    await expectLater(runtime.close(), throwsA(isA<ScopeReleaseException>()));
+
+    expect(diagnostics, hasLength(1));
+    expect(diagnostics.single.outcome, same(exit));
+  });
 
   test('concurrent Runtime.close calls share the active shutdown', () async {
     final started = Completer<void>();

@@ -43,8 +43,15 @@ final class Module extends IterableBase<Binding> {
   Future<ResultDart<A, E>> run<A extends Object, E extends Object>(
     Effect<A, E> effect, {
     ResolverBackend? backend,
+    CleanupFailureObserver? cleanupFailureObserver,
+    String? executionLabel,
   }) async {
-    final exit = await runExit(effect, backend: backend);
+    final exit = await runExit(
+      effect,
+      backend: backend,
+      cleanupFailureObserver: cleanupFailureObserver,
+      executionLabel: executionLabel,
+    );
     return _resultFromExit(exit);
   }
 
@@ -52,17 +59,29 @@ final class Module extends IterableBase<Binding> {
   Future<Exit<A, E>> runExit<A extends Object, E extends Object>(
     Effect<A, E> effect, {
     ResolverBackend? backend,
+    CleanupFailureObserver? cleanupFailureObserver,
+    String? executionLabel,
   }) async {
     Runtime? runtime;
 
     try {
-      runtime = await start(backend: backend);
-      final exit = await runtime.runExit(effect);
+      runtime = await start(
+        backend: backend,
+        cleanupFailureObserver: cleanupFailureObserver,
+      );
+      final exit = await runtime.runExit(
+        effect,
+        executionLabel: executionLabel,
+      );
 
       try {
         await runtime._closeWith(exit);
         return exit;
       } catch (error, stackTrace) {
+        if (exit is ExitSuccess<A, E>) {
+          return ExitDefect<A, E>(error, stackTrace);
+        }
+
         if (exit is ExitDefect<A, E>) {
           return ExitDefect<A, E>(
             CompositeDefect(
@@ -75,7 +94,7 @@ final class Module extends IterableBase<Binding> {
           );
         }
 
-        return ExitDefect<A, E>(error, stackTrace);
+        return exit;
       }
     } catch (error, stackTrace) {
       if (runtime != null) {
@@ -91,8 +110,15 @@ final class Module extends IterableBase<Binding> {
   }
 
   /// Start a long-lived runtime from this module.
-  Future<Runtime> start({ResolverBackend? backend}) {
-    return Runtime.start(this, backend: backend);
+  Future<Runtime> start({
+    ResolverBackend? backend,
+    CleanupFailureObserver? cleanupFailureObserver,
+  }) {
+    return Runtime.start(
+      this,
+      backend: backend,
+      cleanupFailureObserver: cleanupFailureObserver,
+    );
   }
 
   static void _validateBindings(Iterable<Binding> bindings) {

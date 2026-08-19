@@ -3,6 +3,35 @@ part of '../../better_effect.dart';
 /// A finalizer failure captured while closing a [Scope].
 typedef ReleaseFailure = ({Object error, StackTrace stackTrace});
 
+/// Receives cleanup failures without changing the main Effect outcome.
+typedef CleanupFailureObserver =
+    FutureOr<void> Function(CleanupFailureDiagnostic diagnostic);
+
+/// Describes a cleanup failure reported after an Effect outcome was known.
+final class CleanupFailureDiagnostic {
+  const CleanupFailureDiagnostic({
+    required this.outcome,
+    required this.error,
+    required this.executionId,
+    this.executionLabel,
+  });
+
+  /// The success, typed failure, defect, or interruption being cleaned up.
+  final Exit<Object, Object> outcome;
+
+  /// The scoped cleanup failures raised while closing the outcome's Scope.
+  final ScopeReleaseException error;
+
+  /// A caller-provided label for the execution, when available.
+  final String? executionLabel;
+
+  /// A monotonically increasing execution ID within a Runtime.
+  ///
+  /// The value zero identifies Runtime-level cleanup rather than an Effect
+  /// execution.
+  final int executionId;
+}
+
 /// Thrown when a [Module] contains more than one binding for the same service.
 final class DuplicateServiceBindingException implements Exception {
   const DuplicateServiceBindingException({required this.serviceType, this.key});
