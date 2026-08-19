@@ -1,0 +1,20 @@
+# Shared generated files from Dart and Flutter tooling.
+.dart_tool/
+.pub/
+build/
+coverage/
+.flutter-plugins
+.flutter-plugins-dependencies
+
+# Local-only dependency overrides must never be committed.
+**/pubspec_overrides.yaml
+
+# IDE files.
+.idea/
+.vscode/
+*.iml
+
+# Node/Next.js documentation app.
+node_modules/
+.next/
+out/

@@ -1,0 +1,10 @@
+{
+  "title": "Documentação",
+  "pages": [
+    "index",
+    "getting-started",
+    "packages",
+    "guides",
+    "maintainers"
+  ]
+}

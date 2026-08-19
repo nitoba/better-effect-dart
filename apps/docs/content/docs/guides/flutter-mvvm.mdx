@@ -1,0 +1,199 @@
+---
+title: Flutter MVVM
+description: Uma tela completa com Runtime, ViewModel, Command e estado tipado
+---
+
+Flutter tem ferramentas excelentes para renderizar uma árvore, mas não decide
+quem possui um client, como um retry se comporta ou se um erro deve abrir uma
+Snackbar uma única vez. Este package conecta essas decisões sem substituir
+Provider, Riverpod, BLoC ou outro state manager.
+
+O exemplo usa `Session`, `AuthFailure` e `signIn` definidos no [guia de efeitos
+tipados](./effects). Eles representam o contrato de domínio; este guia começa
+na fronteira em que esse contrato vira uma interação Flutter.
+
+## O exemplo: login com estado preservado
+
+O fluxo abaixo mantém a sessão anterior visível enquanto um refresh roda,
+impede taps duplicados e envia a navegação apenas uma vez quando o login
+termina.
+
+### 1. O ViewModel possui o Command
+
+```dart
+typedef LoginInput = ({String email, String password});
+
+final class LoginViewModel extends EffectViewModel {
+  LoginViewModel(super.commands) {
+    login = commandWithInput<LoginInput, Session, AuthFailure>(
+      (input) => signIn(input.email, input.password),
+      concurrency: EffectCommandConcurrency.drop,
+      keepPreviousData: false,
+      debugLabel: 'LoginViewModel.login',
+    );
+  }
+
+  late final EffectCommand<LoginInput, Session, AuthFailure> login;
+}
+```
+
+`drop` é uma escolha de produto: enquanto uma submissão está ativa, um segundo
+toque retorna a execução existente em vez de criar duas sessões. Para busca,
+troque por `latest`; para uploads ou gravações ordenadas, use `queue`.
+
+### 2. A tela renderiza estado, não callbacks
+
+```dart
+class LoginScreen extends StatelessWidget {
+  const LoginScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return EffectViewModelBuilder<LoginViewModel>(
+      create: (_, commands) => LoginViewModel(commands),
+      builder: (context, viewModel, _) {
+        return EffectCommandConsumer<Session, AuthFailure>(
+          command: viewModel.login,
+          onSuccess: (context, session) {
+            Navigator.of(context).pushReplacementNamed('/home');
+          },
+          onFailure: (context, failure, _) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text(failure.toString())),
+            );
+          },
+          onDefect: (context, defect, stack, _) {
+            FlutterError.reportError(
+              FlutterErrorDetails(exception: defect, stack: stack),
+            );
+          },
+          builder: (context, state, _) {
+            return LoginForm(
+              busy: state.isRunning,
+              onSubmit: (input) => viewModel.login.execute(input),
+            );
+          },
+        );
+      },
+    );
+  }
+}
+```
+
+`EffectCommandBuilder` é a opção quando não há efeito imperativo. O
+`EffectCommandListener` ou `EffectCommandConsumer` é o lugar para navegação,
+dialog, snackbar e analytics. Cada estado possui uma `revision`; um listener
+não repete a mesma ação só porque a árvore reconstruiu.
+
+## Estados que a UI consegue distinguir
+
+```dart
+return switch (state) {
+  EffectCommandIdle() => const LoginPrompt(),
+  EffectCommandRunning(:final previous) => LoginForm(
+    busy: true,
+    previousSession: previous,
+  ),
+  EffectCommandSuccess(:final value) => SessionView(value),
+  EffectCommandFailure(:final error, :final previous) => LoginError(error, previous),
+  EffectCommandDefect(:final defect) => UnexpectedErrorView(defect),
+  EffectCommandInterrupted(:final previous) => InterruptedView(previous),
+};
+```
+
+Não reduza isso a `isLoading` + `error != null`: o estado também informa se
+houve sucesso anterior, se a falha era esperada, se houve defeito ou se o
+Command perdeu a posse da execução.
+
+## Bootstrap e ownership
+
+Na raiz da aplicação, `runBetterEffectApp` cria um Runtime de longa duração:
+
+```dart
+Future<void> main() {
+  return runBetterEffectApp(
+    module: appModule,
+    observer: (transition) => debugPrint('$transition'),
+    app: const App(),
+  );
+}
+```
+
+Para add-to-app, preview e testes, `BetterEffectBootstrap` mostra loading,
+permite retry de startup e fecha o Runtime ao ser descartado:
+
+```dart
+BetterEffectBootstrap(
+  module: appModule,
+  loadingBuilder: (_) => const SplashScreen(),
+  errorBuilder: (context, error, stack, retry) => StartupError(
+    error: error,
+    onRetry: retry,
+  ),
+  builder: (_) => const FeatureRoot(),
+)
+```
+
+Se o Runtime já pertence a outro owner, use `BetterEffectProvider.value`. Não
+misture o construtor que possui o Runtime com um `close()` externo; ownership
+duplo é uma fonte comum de cleanup duplicado.
+
+## Concorrência em cenários reais
+
+### Busca: `latest`
+
+```dart
+search = commandWithInput(
+  (query) => searchProducts(query),
+  concurrency: EffectCommandConcurrency.latest,
+);
+```
+
+Todas as chamadas podem continuar no Future, mas somente a mais recente pode
+alterar o estado visível. Uma resposta velha não sobrescreve o texto atual.
+
+### Gravação: `queue`
+
+```dart
+sync = commandWithInput(
+  (change) => persistChange(change),
+  concurrency: EffectCommandConcurrency.queue,
+);
+```
+
+Cada intenção é processada na ordem. Isso é adequado para eventos de edição,
+uploads e toggles onde descartar uma chamada seria incorreto.
+
+### Ação única: `drop`
+
+É o padrão e o melhor comportamento para submit, refresh e ações destrutivas.
+Cancelar um Command interrompe a posse do resultado e ignora a conclusão velha;
+Futures Dart não podem ser forçados a parar, então APIs canceláveis podem ser
+conectadas com `onCancel`.
+
+## Teste com o mesmo fluxo da produção
+
+Substitua apenas o serviço que muda no teste:
+
+```dart
+final runtime = await appModule
+    .overrideWith([
+      .instance<AuthApi>(FakeAuthApi.success()),
+    ])
+    .start();
+
+final viewModel = LoginViewModel(EffectCommands(runtime));
+final exit = await viewModel.login.execute((
+  email: 'dev@example.com',
+  password: 'secret',
+));
+
+expect(exit, isA<ExitSuccess<Session, AuthFailure>>());
+
+viewModel.dispose();
+await runtime.close();
+```
+
+O teste exercita Runtime → Command → ViewModel sem rede global, sleeps ou
+requisições reais. Para widget tests, envolva a tela com
+`BetterEffectProvider.value` e deixe o teste ser o owner do Runtime.

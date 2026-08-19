@@ -1,0 +1,45 @@
+name: CI better_effect
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'packages/better_effect/**'
+      - '.github/workflows/ci-better-effect.yml'
+  pull_request:
+    paths:
+      - 'packages/better_effect/**'
+      - '.github/workflows/ci-better-effect.yml'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/better_effect
+
+    strategy:
+      fail-fast: false
+      matrix:
+        sdk: ['3.10.0', stable]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Dart
+        uses: dart-lang/setup-dart@v1
+        with:
+          sdk: ${{ matrix.sdk }}
+
+      - name: Install dependencies
+        run: dart pub get
+
+      - name: Check formatting
+        run: dart format --output=none --set-exit-if-changed .
+
+      - name: Analyze
+        run: dart analyze --fatal-infos
+
+      - name: Test
+        run: dart test

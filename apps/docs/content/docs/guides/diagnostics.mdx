@@ -1,0 +1,175 @@
+---
+title: Diagnósticos e CI
+description: Encontre problemas locais e valide o grafo completo antes do deploy
+---
+
+O analyzer existe porque dois tipos de problema exigem duas escalas de análise.
+Uma regra local pode dizer que um `Effect` foi descartado; somente uma análise
+do projeto inteiro consegue dizer que o Module raiz não fornece o serviço que
+uma biblioteca solicita.
+
+```text
+Analysis Server plugin → arquivo atual, IDE, dart analyze, flutter analyze
+Graph checker           → lib inteira, roots, composição, CI
+```
+
+## Ative o plugin
+
+```yaml
+include: package:flutter_lints/flutter.yaml
+
+plugins:
+  better_effect_analyzer:
+    version: ^0.1.3
+    diagnostics:
+      repository_requests_repository: true
+      viewmodel_requests_service: true
+      widget_requests_business_dependency: true
+      singleton_viewmodel: true
+```
+
+As cinco regras de correção são ativadas com o plugin. As quatro regras de
+arquitetura são opt-in porque equipes podem escolher fronteiras diferentes.
+Depois de alterar o YAML, reinicie o Analysis Server.
+
+## O que o plugin evita
+
+### Effect descartado
+
+Effects são lazy. Este código cria uma operação mas não a executa:
+
+```dart
+repository.save(user); // warning
+```
+
+O correto é explicitar a intenção:
+
+```dart
+// Dentro de um Effect.result:
+await use.unwrap(repository.save(user));
+
+// Fora do contexto, devolva a descrição para um Runtime executar:
+Effect<Unit, SaveFailure> saveUser(User user) => repository.save(user);
+```
+
+### Context operation sem await
+
+`use.unwrap`, `use.result`, `use.tryAsync` e `use.acquire` devolvem Futures.
+Ignorar o Future também ignora a propagação da falha:
+
+```dart
+use.unwrap(repository.save(user)); // warning
+```
+
+Use `await` dentro do corpo do Effect ou devolva o Future para o chamador:
+
+```dart
+await use.unwrap(repository.save(user));
+
+Future<Unit> persist(User user, EffectContext<SaveFailure> use) {
+  return use.unwrap(repository.save(user));
+}
+```
+
+### Binding sem contrato
+
+Constructor tear-offs são `Function`. Informe o serviço que o resto do grafo
+deve enxergar:
+
+```dart
+Module([
+  .provide<Database>(DatabaseLive.new),
+]);
+```
+
+### Provider incompatível ou duplicado
+
+```dart
+Module([
+  .provide<UserRepository>(AnalyticsService.new), // incompatível
+  .provide<Database>(SqliteDatabase.new),
+  .provide<Database>(MemoryDatabase.new), // identidade duplicada
+]);
+```
+
+Use `ServiceKey` quando duas implementações do mesmo tipo são intencionais.
+
+## Regras arquiteturais e direção da dependência
+
+As regras opcionais reforçam uma direção simples:
+
+```text
+Widget → ViewModel → Repository / UseCase → Service / Client
+```
+
+- Repository não pede outro Repository;
+- ViewModel não acessa client, database ou storage diretamente;
+- Widget não resolve dependência de negócio;
+- ViewModel não vira singleton de vida inteira por acidente.
+
+Essas regras não são estética. Elas evitam que UI, infraestrutura e domínio se
+acoplem e tornam o teste de cada camada menor.
+
+## Graph checker: a visão que o arquivo não tem
+
+Rode a partir da raiz do projeto:
+
+```bash
+dart run better_effect_analyzer
+```
+
+O checker indexa constructors, `use<T>()`, `Effect.service<T>()`, callbacks de
+resource, spreads, `Module.merge` e `overrideWith`. Depois ele constrói o grafo
+dos Modules raiz e procura:
+
+- serviço ausente;
+- ciclo de dependência;
+- Module recursivo;
+- Module indicado que não existe;
+- provider incompatível após composição.
+
+Para selecionar roots explicitamente:
+
+```bash
+dart run better_effect_analyzer \
+  --module appModule \
+  --module backgroundModule
+```
+
+Inclua fixtures quando necessário:
+
+```bash
+dart run better_effect_analyzer --include-tests
+```
+
+## Saídas para automação
+
+Humana:
+
+```bash
+dart run better_effect_analyzer
+```
+
+Machine-readable, para anotações e scripts:
+
+```bash
+dart run better_effect_analyzer --format machine
+dart run better_effect_analyzer --format json
+```
+
+O comando termina com código diferente de zero quando encontra erros. Mantenha
+`dart analyze --fatal-infos` e o graph checker no CI para validar tanto regras
+locais quanto composição.
+
+## Quando suprimir uma regra
+
+Uma exceção pontual pode usar a sintaxe normal do Dart:
+
+```dart
+// ignore: better_effect_analyzer/discarded_effect
+repository.save(user);
+```
+
+Se a decisão vale para o projeto inteiro, remova a regra do mapa `diagnostics`
+em vez de espalhar supressões. A configuração deve contar a história da
+arquitetura.

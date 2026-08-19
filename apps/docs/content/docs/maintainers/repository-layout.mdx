@@ -1,0 +1,31 @@
+---
+title: Layout do repositório
+description: Como packages Dart e o app de documentação convivem
+---
+
+```text
+apps/
+  docs/                 # Next.js + Fumadocs
+packages/
+  better_effect/        # package Dart
+  better_effect_flutter/ # package Flutter + example/
+  better_effect_analyzer/ # plugin e CLI
+```
+
+O app em `apps/docs` tem seu próprio `package.json` e `node_modules`; ele não é
+um package Dart e não participa dos lockfiles do pub.dev. Os três diretórios em
+`packages/` continuam publicáveis isoladamente.
+
+## Por que não misturar os gerenciadores?
+
+O pub resolve `pubspec.yaml` e seus lockfiles por package; o site resolve
+`package.json` com npm. Manter essas fronteiras evita que instalar uma
+dependência de UI altere a resolução Dart ou que o workflow de publicação tente
+empacotar o app de documentação.
+
+No futuro, um workspace Node (pnpm, npm ou Bun) pode orquestrar scripts de todos
+os apps. Isso é uma conveniência de desenvolvimento; não deve transformar os
+três packages Dart em um único artefato ou sincronizar suas versões.
+
+Para desenvolvimento local, rode `npm run dev` dentro de `apps/docs`. Para
+validar o site em produção, rode `npm run build` e `npm run start`.

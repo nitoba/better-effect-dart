@@ -1,0 +1,4 @@
+{
+  "title": "Guias",
+  "pages": ["index", "effects", "resources-and-lifetimes", "flutter-mvvm", "testing", "diagnostics"]
+}

@@ -1,0 +1,59 @@
+---
+title: better_effect_analyzer
+description: Diagnósticos no editor e validação do grafo de Modules
+---
+
+## Duas camadas de análise
+
+O analyzer oferece:
+
+1. um plugin do Analysis Server, para feedback imediato no editor;
+2. um comando de verificação do grafo completo, útil no CI.
+
+Essa divisão nasceu de uma limitação importante: o Analysis Server conhece o
+arquivo e o contexto resolvido que está editando, mas não deve adivinhar qual
+Module a aplicação escolheu como root. O checker de projeto pode fazer essa
+pergunta explicitamente sem tornar cada regra do editor lenta.
+
+## Ativar no editor
+
+```yaml
+plugins:
+  better_effect_analyzer:
+    diagnostics:
+      repository_requests_repository: true
+      viewmodel_requests_service: true
+      widget_requests_business_dependency: true
+      singleton_viewmodel: true
+```
+
+As regras básicas ficam disponíveis ao ativar o plugin. As regras de arquitetura
+são opt-in para que cada aplicação escolha seu nível de restrição.
+
+## Verificar o grafo no CI
+
+```bash
+dart run better_effect_analyzer --help
+```
+
+O executável atual aceita o caminho do projeto como argumento; para o uso mais
+comum, a partir da raiz do app, basta:
+
+```bash
+dart run better_effect_analyzer
+```
+
+O checker encontra Modules raiz, percorre os bindings e reporta dependências
+ausentes, Modules inexistentes e ciclos conforme a configuração.
+
+Leia o [guia de diagnósticos](../guides/diagnostics) para entender cada regra.
+
+## Adoção gradual
+
+1. instale o plugin sem regras arquiteturais;
+2. corrija Effects descartados, bindings ambíguos e incompatíveis;
+3. ative as regras de MVVM uma por vez;
+4. adicione o graph checker ao CI quando o composition root estiver definido.
+
+O analyzer é tooling e não é dependência do Runtime. Removê-lo não altera o
+binário da aplicação; mantê-lo no CI impede que o grafo regresse silenciosamente.

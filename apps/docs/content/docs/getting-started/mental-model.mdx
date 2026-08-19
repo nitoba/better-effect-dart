@@ -1,0 +1,105 @@
+---
+title: Modelo mental
+description: Como Effect, Module, Runtime e ViewModel se conectam
+---
+
+## A ideia central
+
+Uma operação de negócio não precisa conhecer o container de dependências nem a
+UI. Ela recebe um `EffectContext`, solicita os serviços de que precisa e
+retorna um `Effect<A, E>`:
+
+```text
+Module → Runtime → EffectContext → Effect<A, E>
+                                      ├─ sucesso: A
+                                      ├─ falha esperada: E
+                                      └─ defeito: exceção inesperada
+```
+
+`Module` descreve a composição. `Runtime` executa essa composição e administra
+escopos e recursos. `Effect` representa uma operação que ainda não foi
+executada.
+
+## O problema que o modelo resolve
+
+Sem uma fronteira explícita, uma tela costuma acumular responsabilidades:
+
+```text
+Widget → cria client → chama API → captura Exception → muda booleans → mostra SnackBar
+```
+
+Esse fluxo parece curto, mas torna difícil responder perguntas importantes:
+
+- quem criou o client e quando ele será fechado?
+- essa falha é esperada pelo produto ou é um bug?
+- o segundo toque deve duplicar a requisição, substituí-la ou entrar em fila?
+- como testar a tela sem rede e sem um singleton global?
+
+Com os packages, a mesma operação fica distribuída por responsabilidades
+menores:
+
+```text
+Widget → observa Command
+ViewModel → decide a intenção da tela
+Effect → executa a operação e propaga falhas
+Module → fornece implementações
+Runtime → possui recursos e escopos
+Analyzer → verifica a composição
+```
+
+Não é uma regra de que toda função precise virar `Effect`. A arquitetura é
+mais útil na fronteira entre I/O, domínio e UI; lógica pura pode continuar sendo
+uma função Dart normal.
+
+## Três resultados diferentes
+
+- **Sucesso**: o valor esperado foi produzido.
+- **Falha tipada**: uma condição de negócio que o chamador pode tratar.
+- **Defeito**: uma exceção inesperada, erro de infraestrutura ou falha de
+  resolução/limpeza.
+
+Essa separação evita transformar qualquer exceção em uma mensagem genérica e
+permite que cada camada decida o que fazer.
+
+## Como uma requisição percorre o sistema
+
+Considere uma tela de pedidos. O usuário toca em “Atualizar”, o ViewModel pede
+ao repository, o repository precisa de um client HTTP e a resposta pode ser
+`Success`, `Unauthorized` ou `Offline`.
+
+```text
+tap
+  ↓
+EffectCommand.execute()
+  ↓
+Effect<List<Order>, OrderFailure>
+  ↓ use<OrderRepository>()
+Runtime resolve → Repository → HttpClient
+  ↓
+ExitSuccess / ExitFailure / ExitDefect
+  ↓
+EffectCommandState<List<Order>, OrderFailure>
+```
+
+O `Exit` é a representação completa para a borda de infraestrutura. Na maioria
+das chamadas de domínio, `Runtime.run` devolve apenas `ResultDart<A, E>` e
+mantém defeitos como exceções visíveis.
+
+## Onde cada package entra
+
+| Necessidade | Package |
+| --- | --- |
+| Efeitos, injeção e recursos | `better_effect` |
+| Commands e integração com widgets Flutter | `better_effect_flutter` |
+| Feedback no editor e validação do grafo | `better_effect_analyzer` |
+
+## Uma regra prática para decidir onde colocar código
+
+| Código | Lugar recomendado | Motivo |
+| --- | --- | --- |
+| Formatação, cálculo e mapeamento puro | função Dart | não precisa de runtime |
+| Chamada de API, banco ou cache | `Effect`/Repository | falha e dependência explícitas |
+| Composição de implementações | `Module` | um único composition root |
+| Loading, retry e concorrência | `EffectCommand` | semântica observável |
+| Snackbar e navegação | `EffectCommandListener` | executa uma vez por revisão |
+| Grafo de dependências | analyzer | feedback local e CI |

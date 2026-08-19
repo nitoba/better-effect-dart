@@ -1,0 +1,93 @@
+---
+title: better_effect_flutter
+description: MVVM, Commands e integração do runtime com Flutter
+---
+
+## O que ele adiciona
+
+O package Flutter mantém a lógica de negócio no `better_effect` e fornece as
+peças de apresentação:
+
+- `EffectViewModel` para ViewModels que possuem Commands;
+- `EffectCommand` para execuções, concorrência, cancelamento e retry;
+- `EffectCommandBuilder` para renderizar estado;
+- `EffectCommandListener` para efeitos de uma única vez;
+- `BetterEffectScope` e `runBetterEffectApp` para iniciar o runtime.
+
+O package não tenta ser mais um framework de estado. A motivação é dar uma
+ponte precisa entre o modelo de execução do core e o modelo de reconstrução do
+Flutter: o Runtime possui serviços; o Command possui uma execução; a UI apenas
+renderiza o estado e reage a revisões.
+
+## Fluxo recomendado
+
+```text
+Module
+  ↓
+runBetterEffectApp
+  ↓
+BetterEffectScope
+  ↓
+EffectViewModel + EffectCommand
+  ↓
+EffectCommandBuilder / EffectCommandListener
+```
+
+Uma tela deve reagir ao estado do Command; ela não precisa criar serviços nem
+resolver dependências globalmente.
+
+## Um ViewModel simples
+
+```dart
+import 'package:better_effect/better_effect.dart';
+import 'package:better_effect_flutter/better_effect_flutter.dart';
+
+final class Task {
+  const Task({required this.id, required this.title});
+  final String id;
+  final String title;
+}
+
+sealed class TaskFailure implements Exception {
+  const TaskFailure();
+}
+
+abstract interface class TaskRepository {
+  Effect<List<Task>, TaskFailure> all();
+}
+
+final class TasksViewModel extends EffectViewModel {
+  TasksViewModel(super.commands) {
+    load = command<List<Task>, TaskFailure>(
+      () => Effect.result((use) async {
+        final repository = use<TaskRepository>();
+        return use.unwrap(repository.all());
+      }),
+      concurrency: EffectCommandConcurrency.latest,
+    );
+  }
+
+  late final EffectCommand0<List<Task>, TaskFailure> load;
+}
+```
+
+Em um projeto real, `TaskRepository.all()` pode resolver o client HTTP com
+`use<ApiClient>()`. O ViewModel não precisa receber API, database ou injector;
+recebe somente a fábrica de Commands do subtree.
+
+Na UI, use `EffectCommandBuilder` para estados de loading/sucesso/falha e
+`EffectCommandListener` para snackbar, navegação ou outro efeito imperativo.
+
+Veja o [guia de Flutter MVVM](../guides/flutter-mvvm) e o exemplo incluído em
+`packages/better_effect_flutter/example`.
+
+## Quando escolher cada integração
+
+| Situação | API |
+| --- | --- |
+| App possui o root Flutter | `runBetterEffectApp` |
+| Feature, preview ou add-to-app inicializa async | `BetterEffectBootstrap` |
+| Runtime já tem outro owner | `BetterEffectProvider.value` |
+| ViewModel usa `ChangeNotifier` próprio | `EffectCommandOwner` |
+| View só renderiza estado | `EffectCommandBuilder` |
+| View faz navegação/snackbar/analytics | `EffectCommandListener` |

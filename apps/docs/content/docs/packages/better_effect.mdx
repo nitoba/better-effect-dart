@@ -1,0 +1,97 @@
+---
+title: better_effect
+description: Effects, dependency injection, scopes e recursos para Dart
+---
+
+## Para que serve
+
+`better_effect` é a camada de runtime. Ele combina:
+
+- `Effect<A, E>` para operações assíncronas com falha tipada;
+- `Module` para declarar bindings e compor dependências;
+- `Runtime` e `Scope` para controlar o ciclo de vida;
+- `EffectLocal` para contexto por execução.
+
+O core foi construído para ser a menor unidade útil: não importa Flutter, não
+impõe um state manager e não cria um service locator global. Ele pode viver em
+packages de domínio, CLI, backend Dart e na camada compartilhada de uma app
+Flutter.
+
+## Primeiro Effect
+
+```dart
+import 'package:better_effect/better_effect.dart';
+
+sealed class AppFailure implements Exception {
+  const AppFailure();
+}
+
+final class NetworkFailure extends AppFailure {
+  const NetworkFailure(this.message);
+  final String message;
+}
+
+abstract interface class GreetingApi {
+  Future<String> fetchGreeting();
+}
+
+final class GreetingApiLive implements GreetingApi {
+  @override
+  Future<String> fetchGreeting() async => 'Olá, better_effect';
+}
+
+Effect<String, AppFailure> loadGreeting() => Effect.result((use) async {
+  final api = use<GreetingApi>();
+  return api.fetchGreeting();
+});
+```
+
+Na prática, funções factory com `Effect.result`, `Effect.succeed` e
+`Effect.fail` costumam ser suficientes. O importante é manter a operação
+descrita separada da execução.
+
+## Module e lifetimes
+
+```dart
+final module = Module([
+  Binding.singleton<GreetingApi>(GreetingApiLive.new),
+]);
+
+final runtime = await Runtime.start(module);
+final result = await runtime.run(loadGreeting());
+await runtime.close();
+```
+
+Para uma operação única, prefira `module.run(effect)`: ele inicia o Runtime,
+executa o Effect e fecha os recursos automaticamente. Use `Runtime.start` para
+uma app de longa duração, worker ou subtree Flutter que executará muitas
+operações.
+
+Use `factory` para objetos por resolução, `singleton` para uma instância criada
+na inicialização e `lazySingleton` quando a instância só deve nascer no
+primeiro uso.
+
+## Composição de produção, teste e preview
+
+Modules são descrições imutáveis. O mesmo grafo de produção pode receber
+overrides sem alterar a implementação:
+
+```dart
+final production = Module([
+  .provide<Clock>(SystemClock.new),
+  .provide<UserRepository>(UserRepositoryLive.new),
+]);
+
+final test = production.overrideWith([
+  .instance<Clock>(FakeClock.fixed(DateTime(2026, 1, 1))),
+  .instance<UserRepository>(FakeUserRepository()),
+]);
+```
+
+Esse padrão é mais seguro que trocar singletons globais: o override pertence ao
+Runtime/Effect escolhido e não altera outras execuções concorrentes.
+
+## Próximos passos
+
+- [Efeitos e tratamento de falhas](../guides/effects)
+- [API do package no pub.dev](https://pub.dev/packages/better_effect)

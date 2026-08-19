@@ -1,0 +1,191 @@
+---
+title: Efeitos e falhas tipadas
+description: Construa um fluxo real de login sem perder a semântica dos erros
+---
+
+Uma operação de produção normalmente combina mais de uma etapa: ler cache,
+chamar API, validar a resposta, salvar a sessão e registrar auditoria. O valor
+de `Effect` aparece quando essas etapas continuam componíveis mesmo com falhas
+e dependências diferentes.
+
+## Um domínio completo
+
+Vamos modelar login. A UI não precisa saber como o token é obtido; o repository
+não precisa conhecer o widget; o `Module` decide quais implementações estão
+ativas.
+
+```dart
+import 'package:better_effect/better_effect.dart';
+
+sealed class AuthFailure implements Exception {
+  const AuthFailure();
+}
+
+final class InvalidCredentials extends AuthFailure {
+  const InvalidCredentials();
+}
+
+final class AuthUnavailable extends AuthFailure {
+  const AuthUnavailable(this.cause);
+  final Object cause;
+}
+
+final class Session {
+  const Session({required this.userId, required this.token});
+  final String userId;
+  final String token;
+}
+
+abstract interface class AuthApi {
+  Future<Session> signIn(String email, String password);
+}
+
+abstract interface class SessionCache {
+  Future<void> write(Session session);
+}
+
+final class AuthApiHttp implements AuthApi {
+  @override
+  Future<Session> signIn(String email, String password) async {
+    // Adapter HTTP omitido: transforme a resposta da API em Session.
+    throw UnimplementedError();
+  }
+}
+
+final class SessionCacheMemory implements SessionCache {
+  Session? value;
+
+  @override
+  Future<void> write(Session session) async => value = session;
+}
+
+typedef AuthEffect<A extends Object> = Effect<A, AuthFailure>;
+
+AuthEffect<Session> signIn(String email, String password) =>
+    Effect.result((use) async {
+      final api = use<AuthApi>();
+      final cache = use<SessionCache>();
+
+      final session = await use.unwrap(
+        Effect.tryAsync(
+          () => api.signIn(email, password),
+          onError: (error, stack) => AuthUnavailable(error),
+        ),
+      );
+
+      await use.unwrap(
+        Effect.tryAsync(
+          () => cache.write(session),
+          onError: (error, stack) => AuthUnavailable(error),
+        ),
+      );
+
+      return session;
+    });
+```
+
+As implementações concretas (`AuthApiHttp` e `SessionCacheMemory`) ficam no
+Module, não dentro do use case:
+
+```dart
+final authModule = Module([
+  .provide<AuthApi>(AuthApiHttp.new),
+  .provide<SessionCache>(SessionCacheMemory.new),
+]);
+```
+
+Observe três decisões no exemplo:
+
+1. `AuthFailure` descreve falhas que o produto pode tratar;
+2. as dependências são resolvidas no `EffectContext`, não em um singleton;
+3. cada etapa é lazy e só roda quando um `Runtime` a executa.
+
+## Não transforme todo erro em falha de domínio
+
+`tryAsync` captura objetos `Exception` que pertencem ao contrato da aplicação.
+Um `Error`, uma dependência ausente ou uma falha no cleanup continua sendo
+defeito. Isso é intencional: esconder um bug como “não foi possível fazer
+login” atrapalha logs, alertas e correção.
+
+```dart
+final result = await runtime.run(signIn(email, password));
+
+result.fold(
+  (session) => openHome(session),
+  (failure) => showAuthMessage(failure),
+);
+```
+
+Quando uma borda precisa distinguir todos os resultados — por exemplo, um
+worker que envia métricas — use `runExit`:
+
+```dart
+final exit = await runtime.runExit(signIn(email, password));
+
+switch (exit) {
+  case ExitSuccess(value: final session):
+    audit('login_success', session.userId);
+  case ExitFailure(error: final failure):
+    audit('login_rejected', failure);
+  case ExitDefect(defect: final defect, stackTrace: final stack):
+    reportCrash(defect, stack);
+  case ExitInterrupted():
+    audit('login_interrupted', null);
+}
+```
+
+## Compose sem callbacks aninhados
+
+Depois de separar as operações, `flatMap`, `map`, `catchAll` e `zip` permitem
+compor fluxos sem executar prematuramente:
+
+```dart
+final dashboard = Effect.zip(
+  loadProfile(),
+  loadNotifications(),
+).map((pair) => Dashboard(profile: pair.$1, notifications: pair.$2));
+```
+
+Use `Effect.parZip` quando as duas leituras são independentes e podem começar
+ao mesmo tempo. Use `Effect.zip` quando a ordem ou o custo de concorrência
+importar. Ambos preservam a mesma falha tipada.
+
+## Recursos e cleanup
+
+Um client ou conexão que pertence ao Runtime deve ser declarado como resource:
+
+```dart
+final module = Module([
+  .resource<DatabaseConnection>(
+    acquire: (services) async => DatabaseConnection.open(),
+    release: (connection) => connection.close(),
+  ),
+  .provide<OrderRepository>(OrderRepositoryLive.new),
+]);
+```
+
+Recursos são adquiridos na ordem da declaração e fechados na ordem inversa.
+Para um recurso que deve viver apenas durante uma execução, use
+`use.acquire` dentro do Effect; o release ocorrerá mesmo quando a operação
+falhar.
+
+## Contexto por execução sem global
+
+Request IDs, tenant e metadados de tracing podem viajar com o Effect:
+
+```dart
+const requestId = EffectLocal<String>('unknown', name: 'requestId');
+
+final program = logRequest().withLocal(requestId, 'req-42');
+await runtime.run(program);
+```
+
+Effects aninhados enxergam o local; outra execução recebe outro valor. Isso
+evita usar variáveis globais ou `Zone` para dados que pertencem à requisição.
+
+## Quando não usar Effect
+
+Não envolva toda função pura em `Effect`. Validações locais, mapeamentos e
+formatadores podem continuar sendo Dart comum. Use Effect quando há pelo menos
+uma destas fronteiras: dependência contextual, I/O, falha esperada, recurso ou
+composição que precisa ser testada com implementações alternativas.

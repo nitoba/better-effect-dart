@@ -1,0 +1,90 @@
+---
+title: Visão geral
+description: A arquitetura better_effect em poucos minutos
+---
+
+`better_effect` é um conjunto de packages Dart e Flutter para construir
+aplicações com dependências explícitas, efeitos assíncronos e falhas tipadas.
+
+## Por que estes packages existem?
+
+Aplicações começam simples: uma função chama um client, o widget mostra um
+`FutureBuilder` e uma exceção vira uma mensagem de erro. Conforme o produto
+cresce, três problemas aparecem juntos:
+
+1. **Dependências ficam invisíveis** — qualquer camada acessa um singleton ou
+   cria seu próprio client.
+2. **Falhas diferentes parecem iguais** — uma validação de negócio, uma perda de
+   conexão e um bug de programação terminam no mesmo `catch`.
+3. **Estado assíncrono perde semântica** — loading, retry, concorrência e
+   efeitos de uma vez são espalhados entre callbacks e booleans.
+
+O objetivo deste projeto é resolver essas três pressões sem exigir um runtime
+complexo, uma linguagem nova ou um framework de aplicação. A proposta é uma
+linha pequena e explícita:
+
+```text
+Effect descreve a operação
+Module descreve de onde vêm as dependências
+Runtime controla execução e lifetimes
+Command projeta a execução em estado de UI
+Analyzer verifica o grafo antes do deploy
+```
+
+## Decisões que orientam o design
+
+### Dart e Flutter continuam sendo Dart e Flutter
+
+Os packages usam `Future`, `async`/`await`, records, pattern matching e as
+convenções do ecossistema. Isso reduz o custo de adoção: a equipe não precisa
+aprender fibers, schedulers ou uma DSL de injeção para começar.
+
+### Falha esperada não é defeito
+
+Uma falha esperada é parte do contrato (`UserNotFound`, `Unauthorized`,
+`NetworkUnavailable`). Um defeito é algo que o programa não conseguiu prever:
+uma dependência ausente, um `Error`, um bug de programação ou falha de cleanup.
+Separá-los deixa cada camada tomar a decisão correta.
+
+### Composição no início, resolução no uso
+
+`Module` fica no composition root, mas o `Effect` pede o serviço quando precisa
+dele. Assim, a lógica de negócio não conhece o container e o mesmo programa
+pode rodar com produção, memória ou fake em testes.
+
+### Lifecycle é uma responsabilidade explícita
+
+Clients, conexões e subscriptions têm dono. `Runtime` mantém recursos da
+aplicação; `Scope` fecha recursos de uma execução; Flutter fecha o Runtime no
+desmonte do subtree. Essa regra evita tanto vazamentos quanto `close()` duplicado.
+
+### Feedback deve chegar antes do CI
+
+O analyzer oferece feedback no editor para erros locais e um checker de grafo
+para a composição completa. Um programa pode estar correto arquivo a arquivo e
+ainda assim faltar um binding no Module raiz — são problemas diferentes, por
+isso existem verificações diferentes.
+
+O projeto é dividido em três camadas:
+
+<Cards>
+  <Card title="better_effect" href="/docs/packages/better_effect" description="Runtime Dart com Effect, Module, escopos e recursos." />
+  <Card title="better_effect_flutter" href="/docs/packages/better_effect_flutter" description="Integração Flutter para Commands, ViewModels e UI reativa." />
+  <Card title="better_effect_analyzer" href="/docs/packages/better_effect_analyzer" description="Plugin e CLI para encontrar problemas no código e no grafo de Modules." />
+</Cards>
+
+## O caminho recomendado
+
+1. Leia [por que estes packages existem](/docs/getting-started/why-better-effect)
+   e depois o [modelo mental](/docs/getting-started/mental-model).
+2. Siga a [primeira feature](/docs/getting-started/first-feature), instale o
+   [`better_effect`](/docs/packages/better_effect) e defina seu
+   primeiro `Effect`.
+3. Em Flutter, siga o guia de
+   [`better_effect_flutter`](/docs/packages/better_effect_flutter).
+4. Ative os diagnósticos do
+   [`better_effect_analyzer`](/docs/packages/better_effect_analyzer).
+
+Os packages são publicados de forma independente no pub.dev. Consulte o
+[guia de releases](/docs/maintainers/releases) quando for publicar uma nova
+versão.

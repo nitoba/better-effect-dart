@@ -1,0 +1,201 @@
+---
+title: Por que better_effect?
+description: O problema arquitetural que motivou os packages e as decisões por trás deles
+---
+
+`better_effect` nasceu de uma situação comum em aplicações Dart: o primeiro
+protótipo é rápido, mas a sexta feature já precisa decidir quem cria o client,
+quem fecha uma conexão, qual erro pode virar mensagem para o usuário e o que
+acontece quando duas ações chegam ao mesmo tempo.
+
+O projeto não tenta transformar Dart em outra linguagem. Ele organiza as
+fronteiras que já existem numa aplicação — I/O, dependências, ciclo de vida e
+estado de UI — para que elas continuem explícitas quando o código crescer.
+
+## O custo de deixar tudo implícito
+
+Este exemplo é perfeitamente capaz de funcionar no primeiro dia:
+
+```dart
+class OrdersPage extends StatefulWidget {
+  const OrdersPage({super.key});
+
+  @override
+  State<OrdersPage> createState() => _OrdersPageState();
+}
+
+class _OrdersPageState extends State<OrdersPage> {
+  bool loading = false;
+  String? error;
+  List<Order> orders = const [];
+
+  Future<void> refresh() async {
+    setState(() {
+      loading = true;
+      error = null;
+    });
+
+    try {
+      final client = HttpClient();
+      final request = await client.getUrl(
+        Uri.parse('https://api.example.com/orders'),
+      );
+      final response = await request.close();
+      orders = await decodeOrders(response);
+    } catch (_) {
+      error = 'Não foi possível carregar os pedidos';
+    } finally {
+      if (mounted) setState(() => loading = false);
+    }
+  }
+}
+```
+
+O problema não é `setState`, `try/catch` ou `Future`. O problema é que uma
+única classe agora possui responsabilidades que mudam por motivos diferentes:
+
+| Responsabilidade escondida | Pergunta que aparece depois | Consequência |
+| --- | --- | --- |
+| `HttpClient()` dentro da tela | Quem configura timeout, auth e retry? | Cada tela pode criar uma política diferente |
+| `catch (_) ` | Foi offline, sessão expirada ou bug? | O produto perde informação sobre a falha |
+| `loading` manual | Um segundo toque deve duplicar, cancelar ou enfileirar? | Race conditions e estados impossíveis |
+| Nenhum owner explícito | Quando o client e a subscription fecham? | Vazamentos ou `close()` duplicado |
+| Dependência criada no widget | Como testar sem rede? | Testes lentos e frágeis |
+
+O código continua compilando, mas suas decisões importantes ficam espalhadas
+em callbacks. O custo aparece na feature seguinte, não no primeiro `Future`.
+
+## A proposta em uma linha
+
+O core transforma uma operação em uma descrição lazy, dá um lugar único para
+compor implementações e mantém o ciclo de vida no owner correto:
+
+```text
+Effect<A, E>       descreve uma operação e seus resultados
+Module             compõe serviços, recursos e overrides
+Runtime / Scope    executa e fecha o que possui
+Command            projeta uma execução em estado observável de UI
+Analyzer           verifica regras locais e o grafo completo
+```
+
+A operação não executa quando é criada. Ela só pede `ApiClient` ou
+`Repository` ao ser executada por um Runtime. Por isso o mesmo fluxo pode usar
+produção, memória, fake ou uma implementação de preview sem alterar o domínio.
+
+## Por que são três packages?
+
+Separar os packages foi uma decisão de produto e de dependência, não apenas de
+organização de pastas. Cada consumidor paga somente pelo que precisa:
+
+```text
+better_effect                 ← core Dart, sem Flutter
+        ↑
+better_effect_flutter         ← ponte para widgets e Commands
+
+better_effect_analyzer        ← tooling de desenvolvimento, separado do binário
+```
+
+| Package | Motivação da existência | O que fica deliberadamente fora |
+| --- | --- | --- |
+| `better_effect` | Levar efeitos, composição e lifetimes para qualquer programa Dart | Widgets, `BuildContext` e política de apresentação |
+| `better_effect_flutter` | Dar uma borda Flutter para Runtime, estado e concorrência | Um container global ou um state manager obrigatório |
+| `better_effect_analyzer` | Verificar erros locais e o grafo completo antes do deploy | Dependências de runtime e código executado em produção |
+
+Essa divisão permite compartilhar domínio entre uma app Flutter, um worker e
+um comando Dart sem importar Flutter. Também permite atualizar regras do
+analyzer sem aumentar o artefato distribuído para usuários finais.
+
+## Decisões deliberadas
+
+<Accordions>
+  <Accordion title="Por que não usar um service locator global?">
+    Um locator global resolve o acesso, mas também esconde o contrato. Uma
+    função que chama `getIt.get<ApiClient>()` pode ser executada somente em um
+    ambiente configurado globalmente e o teste precisa limpar estado de outra
+    execução. Em `better_effect`, `use<ApiClient>()` deixa a dependência perto
+    do ponto onde ela é usada, enquanto `Module` define a composição fora da
+    lógica de negócio.
+  </Accordion>
+  <Accordion title="Por que não converter toda exceção em uma falha tipada?">
+    Falha esperada é parte do produto: credenciais inválidas, pedido não
+    encontrado ou ausência de conexão. Um `StateError`, um provider ausente ou
+    um erro de programação são defeitos. Se todos virarem a mesma classe de
+    erro, a UI pode parecer amigável enquanto o alerta de produção desaparece.
+    `Effect.tryAsync` mapeia `Exception` de uma borda conhecida; `Error` e
+    defeitos de infraestrutura continuam visíveis.
+  </Accordion>
+  <Accordion title="Por que não substituir o state manager?">
+    Flutter já tem várias soluções válidas para estado. O package adiciona a
+    semântica que faltava entre um Runtime e uma árvore de widgets: Commands
+    com loading, sucesso, falha, defeito, revisão e política de concorrência.
+    Você pode manter Provider, um router ou componentes próprios e adotar
+    somente o boundary que resolve seu problema.
+  </Accordion>
+  <Accordion title="Por que existe um analyzer separado?">
+    Uma regra de arquivo detecta que um Effect foi descartado. Ela não consegue
+    saber sozinha se o Module raiz fornece a implementação de um serviço pedido
+    por um package distante. O plugin oferece feedback imediato; o graph
+    checker percorre a composição inteira no CI. São escalas diferentes, não
+    duas versões da mesma verificação.
+  </Accordion>
+</Accordions>
+
+## O que o projeto promete — e o que não promete
+
+| Promete | Não promete |
+| --- | --- |
+| Dependências e lifetimes visíveis | Resolver arquitetura de produto por você |
+| Falhas esperadas separadas de defeitos | Fazer retry de toda operação automaticamente |
+| Composição testável com overrides | Substituir validação de domínio ou observabilidade |
+| Estados e concorrência explícitos no Flutter | Cancelar magicamente qualquer `Future` Dart |
+| Feedback no editor e no CI | Impedir todas as decisões ruins da aplicação |
+
+## O mesmo core em ambientes diferentes
+
+<Tabs items={['Dart / backend', 'Flutter / produto']}>
+  <Tab>
+    Em um worker Dart, o `Module` pode possuir pool de conexões, filas e
+    clientes HTTP. Um `Runtime` de longa duração executa vários Effects e fecha
+    tudo durante o shutdown do processo. Não há dependência de `BuildContext` ou
+    de widgets.
+
+    ```dart
+    final runtime = await appModule.start();
+    try {
+      await runtime.run(processPendingOrders());
+    } finally {
+      await runtime.close();
+    }
+    ```
+  </Tab>
+  <Tab>
+    No Flutter, o mesmo Effect fica no repository ou use case. O package
+    `better_effect_flutter` adiciona ViewModels e Commands para expressar
+    concorrência e renderização, enquanto o Runtime continua sendo dono dos
+    serviços.
+
+    ```dart
+    EffectCommandBuilder<List<Order>, OrderFailure>(
+      command: viewModel.refresh,
+      builder: (context, state, child) => OrdersView(state: state),
+    )
+    ```
+  </Tab>
+</Tabs>
+
+## Adoção gradual
+
+Não é necessário migrar um monólito inteiro de uma vez. Uma sequência segura é:
+
+1. modele uma fronteira de I/O como `Effect<A, E>`, mantendo funções puras como
+   Dart normal;
+2. coloque a implementação atrás de uma interface e registre-a no `Module`;
+3. no Flutter, substitua apenas o fluxo assíncrono mais sensível por um
+   `EffectCommand`;
+4. ative primeiro as regras corretivas do analyzer e só depois as regras
+   arquiteturais opcionais;
+5. faça o graph checker virar uma etapa do CI quando os Modules raiz estiverem
+   definidos.
+
+Comece pelo [modelo mental](./mental-model), depois construa a sua [primeira
+feature](./first-feature).

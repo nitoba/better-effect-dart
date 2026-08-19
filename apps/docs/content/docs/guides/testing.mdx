@@ -1,0 +1,215 @@
+---
+title: Testando Effects e Commands
+description: Testes determinísticos para falhas, recursos, concorrência e UI
+---
+
+O teste deve exercitar decisões, não acidentes de infraestrutura. Como o
+`Effect` é lazy e o `Module` aceita overrides, é possível manter o fluxo de
+produção e trocar somente a folha que fala com rede, banco ou relógio.
+
+Os trechos abaixo partem dos tipos da [primeira feature](../getting-started/first-feature)
+(`Order`, `OrderFailure`, `OrdersApi`, `loadOrders` e `appModule`). Em um projeto
+real, eles ficam nos imports do teste; as fixtures usadas aqui são deliberadamente
+pequenas para manter a pergunta de cada teste visível.
+
+## Teste de uma operação de domínio
+
+Comece pelo contrato da operação:
+
+```dart
+import 'package:test/test.dart';
+
+test('retorna pedidos da implementação configurada', () async {
+  final module = appModule.overrideWith([
+    .instance<OrdersApi>(FakeOrdersApi.success([
+      const Order(id: 'ord-1', total: 42),
+    ])),
+  ]);
+
+  final result = await module.run(loadOrders());
+
+  expect(result.isSuccess(), isTrue);
+  expect(result.getOrNull()?.single.total, 42);
+});
+```
+
+O `Module.run` cria um Runtime temporário, executa o Effect e fecha os
+recursos. Para um teste de uma operação, isso evita boilerplate de startup e
+shutdown.
+
+## Verifique cada canal de resultado
+
+Uma falha esperada não deve virar defeito, e um defeito não deve ser aceito
+como uma falha de produto. `runExit` torna a distinção verificável:
+
+```dart
+import 'dart:async';
+
+import 'package:better_effect/better_effect.dart';
+import 'package:better_effect_flutter/better_effect_flutter.dart';
+import 'package:test/test.dart';
+
+final class FakeOrdersApi implements OrdersApi {
+  const FakeOrdersApi(this._load);
+
+  factory FakeOrdersApi.success(List<Order> orders) {
+    return FakeOrdersApi(() async => orders);
+  }
+
+  factory FakeOrdersApi.throwing(Object error) {
+    return FakeOrdersApi(() => Future<List<Order>>.error(error));
+  }
+
+  final Future<List<Order>> Function() _load;
+
+  @override
+  Future<List<Order>> getOrders() => _load();
+}
+
+test('mapeia uma exceção de rede para a falha do domínio', () async {
+  final module = appModule.overrideWith([
+    .instance<OrdersApi>(FakeOrdersApi.throwing(Exception('offline'))),
+  ]);
+
+  final exit = await module.runExit(loadOrders());
+
+  expect(exit, isA<ExitFailure<List<Order>, OrderFailure>>());
+  expect(
+    (exit as ExitFailure<List<Order>, OrderFailure>).error,
+    isA<OrdersOffline>(),
+  );
+});
+
+test('preserva um bug como defeito', () async {
+  final module = appModule.overrideWith([
+    .instance<OrdersApi>(FakeOrdersApi.throwing(StateError('invalid state'))),
+  ]);
+
+  final exit = await module.runExit(loadOrders());
+
+  expect(exit, isA<ExitDefect<List<Order>, OrderFailure>>());
+});
+```
+
+O primeiro caso alimenta a experiência de retry. O segundo deve alimentar
+logs, alertas ou um teste de regressão — não uma mensagem genérica de offline.
+
+## Teste de um Command sem widget
+
+Commands são `ValueListenable`s, mas não exigem montar uma árvore Flutter para
+validar concorrência e resultado:
+
+```dart
+import 'dart:async';
+
+import 'package:better_effect_flutter/better_effect_flutter.dart';
+import 'package:test/test.dart';
+
+test('drop não cria duas leituras concorrentes', () async {
+  final runtime = await appModule.start();
+  final commands = EffectCommands(runtime);
+  final gate = Completer<void>();
+  var calls = 0;
+
+  final command = commands.withInput<String, Order, OrderFailure>(
+    (_) => Effect<Order, OrderFailure>.result((_) async {
+      calls++;
+      await gate.future;
+      return const Order(id: 'ord-1', total: 42);
+    }),
+    concurrency: EffectCommandConcurrency.drop,
+  );
+
+  final first = command.execute('first');
+  final second = command.execute('second');
+  expect(calls, 1);
+
+  gate.complete();
+  await Future.wait([first, second]);
+
+  expect(command.value, isA<EffectCommandSuccess<Order, OrderFailure>>());
+
+  command.dispose();
+  await runtime.close();
+});
+```
+
+Use a mesma técnica para `latest` (a resposta velha não pode vencer) e
+`queue` (as intenções precisam ser processadas na ordem). O teste descreve a
+decisão de produto sem `pumpAndSettle` ou sleeps longos.
+
+## Widget test: teste a borda, não o container inteiro
+
+Quando a pergunta é visual — loading, conteúdo anterior, mensagem de falha —
+monte a tela com um Runtime de teste:
+
+```dart
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:better_effect/better_effect.dart';
+import 'package:better_effect_flutter/better_effect_flutter.dart';
+
+final class OfflineOrderRepository implements OrderRepository {
+  const OfflineOrderRepository();
+
+  @override
+  Effect<List<Order>, OrderFailure> loadOrders() {
+    return Effect.fail(OrdersOffline(Exception('offline')));
+  }
+}
+
+testWidgets('mostra retry para falha esperada', (tester) async {
+  final runtime = await appModule.overrideWith([
+    .instance<OrderRepository>(const OfflineOrderRepository()),
+  ]).start();
+
+  await tester.pumpWidget(
+    BetterEffectProvider.value(
+      runtime: runtime,
+      child: const MaterialApp(home: OrdersScreen()),
+    ),
+  );
+
+  await tester.tap(find.text('Atualizar'));
+  await tester.pumpAndSettle();
+
+  expect(find.text('Tentar novamente'), findsOneWidget);
+
+  await tester.pumpWidget(const SizedBox.shrink());
+  await runtime.close();
+});
+```
+
+`BetterEffectProvider.value` deixa o teste ser o owner do Runtime. Isso evita
+que a árvore feche uma instância que outro fixture ainda usa. Em testes com
+`BetterEffectBootstrap`, deixe o widget possuir o Runtime e aguarde a tela de
+startup antes de interagir.
+
+## Analyzer como teste arquitetural
+
+Testes de comportamento não detectam todo erro de composição. Inclua as duas
+escalas no CI:
+
+```bash
+dart analyze --fatal-infos
+dart run better_effect_analyzer --format machine
+flutter test
+```
+
+O plugin encontra Effects descartados e operações de contexto sem `await` no
+arquivo atual. O graph checker verifica bindings ausentes, ciclos, roots e
+providers incompatíveis. Um projeto pode passar em um e falhar no outro; isso
+é informação útil, não duplicação.
+
+## Checklist de um teste forte
+
+- substitua a borda de I/O com `.instance` ou `overrideWith`;
+- teste pelo menos uma falha esperada e um defeito relevante;
+- verifique a política de concorrência escolhida pelo produto;
+- mantenha o owner do Runtime explícito no final do teste;
+- prefira `runExit` quando cleanup e defeitos fizerem parte da pergunta;
+- rode analyzer, graph checker e testes de widget em etapas separadas.
+
+O resultado é um conjunto de testes rápidos que valida o mesmo desenho usado
+em produção, em vez de uma segunda implementação especial para o ambiente de
+teste.

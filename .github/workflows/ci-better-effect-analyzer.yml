@@ -1,0 +1,33 @@
+name: CI better_effect_analyzer
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'packages/better_effect_analyzer/**'
+      - 'packages/better_effect/**'
+      - '.github/workflows/ci-better-effect-analyzer.yml'
+  pull_request:
+    paths:
+      - 'packages/better_effect_analyzer/**'
+      - '.github/workflows/ci-better-effect-analyzer.yml'
+
+jobs:
+  analyze-and-test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/better_effect_analyzer
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+
+      - run: dart pub get
+      - run: dart format --output=none --set-exit-if-changed .
+      - run: dart analyze --fatal-infos
+      - run: dart test
+      - run: dart pub publish --dry-run

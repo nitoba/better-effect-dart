@@ -1,0 +1,61 @@
+---
+title: Instalação
+description: Adicione os packages ao seu projeto Dart ou Flutter
+---
+
+## Dart
+
+```bash
+dart pub add better_effect
+```
+
+O package base é Dart-only e não depende de Flutter. Escolha-o quando a lógica
+fica em um package compartilhado, backend, CLI ou domínio que precisa ser
+testado sem bindings de UI.
+
+## Flutter
+
+```bash
+flutter pub add better_effect_flutter
+```
+
+`better_effect_flutter` já depende do core e reexporta sua API pública. Em uma
+app Flutter, esta é a instalação recomendada; adicione o core diretamente
+apenas quando um package Dart separado também o utilizar.
+
+O package Flutter reexporta a API pública de `better_effect`. Em aplicações
+Flutter, normalmente basta importar:
+
+```dart
+import 'package:better_effect_flutter/better_effect_flutter.dart';
+```
+
+## Analyzer
+
+Adicione o analyzer como dependência de desenvolvimento:
+
+```bash
+dart pub add --dev better_effect_analyzer
+```
+
+O analyzer é ferramenta de desenvolvimento: não entra no bundle, não é
+resolvido pelo Runtime e não deve aparecer em `dependencies` de produção.
+
+Depois ative o plugin no `analysis_options.yaml`:
+
+```yaml
+plugins:
+  better_effect_analyzer:
+    diagnostics:
+      repository_requests_repository: true
+      viewmodel_requests_service: true
+      widget_requests_business_dependency: true
+      singleton_viewmodel: true
+```
+
+Depois de editar `analysis_options.yaml`, reinicie o Analysis Server da IDE.
+Use `version` para um package publicado e `path` absoluto apenas enquanto
+desenvolve o analyzer dentro deste monorepo.
+
+Consulte o guia de [diagnósticos](../guides/diagnostics) para escolher as
+regras adequadas ao projeto.

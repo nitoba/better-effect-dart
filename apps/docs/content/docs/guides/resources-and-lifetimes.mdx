@@ -1,0 +1,172 @@
+---
+title: Recursos e ciclo de vida
+description: Escolha o owner correto para clients, conexões, subscriptions e recursos temporários
+---
+
+Uma dependência não é apenas um tipo. Ela também tem uma duração e um owner.
+Um `HttpClient` pode viver durante toda a aplicação; um arquivo temporário pode
+existir somente durante um Effect. O package torna essa decisão explícita para
+que aquisição e cleanup tenham o mesmo desenho.
+
+Os tipos `ApiClientHttp`, `Response`, `TemporaryFile`, `ExportResult` e
+`ExportFailure` nos exemplos representam adapters da aplicação. Eles aparecem
+abreviados para manter o foco na regra de ownership; a API do package usada
+para declarar e liberar os recursos é completa.
+
+## Comece pela pergunta: quem é o dono?
+
+| Recurso | Duração típica | Owner recomendado | API |
+| --- | --- | --- | --- |
+| Configuração e relógio | processo/app | `Module` | `.provide` ou `.instance` |
+| Client HTTP reutilizado | Runtime | `Module` | `.resource` |
+| Transaction de uma operação | Effect/Scope | execução | `use.acquire` |
+| Subscription de uma feature | subtree Flutter | Provider/Bootstrap | Runtime do subtree |
+| Arquivo temporário | etapa de um Effect | Effect | `use.acquire` |
+
+Se você não consegue responder quem fecha um recurso, o desenho ainda não está
+completo. Criar um singleton global só adia a pergunta para o shutdown.
+
+## Recursos do Runtime com `Module.resource`
+
+Use `Module.resource` quando a instância deve nascer junto com o Runtime e
+continuar disponível para várias operações:
+
+```dart
+abstract interface class ApiClient {
+  Future<Response> get(Uri uri);
+  Future<void> close();
+}
+
+final appModule = Module([
+  .resource<ApiClient>(
+    acquire: (_) async {
+      final client = ApiClientHttp(baseUrl: Uri.parse('https://api.example.com'));
+      await client.connect();
+      return client;
+    },
+    release: (client) => client.close(),
+  ),
+  .provide<OrdersApi>(OrdersApiHttp.new),
+]);
+```
+
+O Runtime adquire resources na ordem declarada e libera em ordem inversa. Se
+`OrdersApi` depender de `ApiClient`, ele só será resolvido depois que a
+capacidade estiver registrada. Se o startup falhar, os recursos já adquiridos
+também são fechados.
+
+```text
+acquire Config → acquire ApiClient → acquire Database
+close Database → close ApiClient → close Config
+```
+
+Isso é especialmente útil para pools, sockets, métricas, clients com sessão e
+qualquer objeto cujo cleanup precise acontecer uma única vez.
+
+## Recursos locais com `use.acquire`
+
+Use `use.acquire` quando a vida do recurso deve ser exatamente a vida da
+execução atual:
+
+```dart
+Effect<ExportResult, ExportFailure> exportOrders() =>
+    Effect.result((use) async {
+      final file = await use.acquire(
+        Effect.tryAsync(
+          TemporaryFile.create,
+          onError: (error, stack) => ExportFailure.open(error),
+        ),
+        release: (file) => file.delete(),
+      );
+
+      final repository = use<OrderRepository>();
+      final orders = await use.unwrap(repository.loadOrders());
+      await file.write(encodeOrders(orders));
+      return uploadExport(file);
+    });
+```
+
+Mesmo que `loadOrders` falhe ou `uploadExport` produza um defeito, o release é
+registrado no Scope atual. O código que usa o arquivo não precisa lembrar de
+duplicar `delete()` em cada ramo de erro.
+
+## Escolha entre os dois mecanismos
+
+<Accordions>
+  <Accordion title="O client deve ser compartilhado por toda a app">
+    Registre-o como `.resource` no Module raiz. Um Runtime de longa duração
+    possui uma instância e a fecha no shutdown. Em Flutter, deixe
+    `BetterEffectProvider` ou `BetterEffectBootstrap` ser o owner do Runtime.
+  </Accordion>
+  <Accordion title="A conexão pertence a uma única operação">
+    Adquira-a com `use.acquire`. Isso mantém o pool da app separado de uma
+    transaction ou lock temporário e garante cleanup mesmo em falhas esperadas.
+  </Accordion>
+  <Accordion title="O recurso é criado pelo teste">
+    Prefira `.instance` ou um override de `.resource` no Module de teste. O
+    teste deve controlar explicitamente quando o Runtime fecha, sem mutar o
+    Module de produção nem depender de estado global.
+  </Accordion>
+</Accordions>
+
+## Lifetimes de bindings
+
+Bindings de constructor possuem quatro políticas. A escolha deve refletir o
+contrato, não uma otimização prematura:
+
+```dart
+final module = Module([
+  .provide<Clock>(SystemClock.new), // lazySingleton: default
+  .singleton<AppConfig>(AppConfig.load),
+  .factory<RequestId>(RequestId.new),
+  .instance<FeatureFlags>(flags),
+]);
+```
+
+- `lazySingleton`: cria na primeira resolução e reutiliza no Runtime;
+- `singleton`: cria durante o startup do Runtime;
+- `factory`: cria uma instância nova a cada resolução;
+- `instance`: usa o objeto já criado pelo composition root.
+
+`singleton` não significa “global para o processo”: a instância pertence ao
+Runtime que a criou. Dois Runtimes podem usar configurações ou fakes diferentes
+sem interferir entre si.
+
+## Shutdown é parte do contrato
+
+```dart
+final runtime = await appModule.start();
+
+try {
+  await serve(runtime);
+} finally {
+  await runtime.close();
+}
+```
+
+O `close()` pode revelar um defeito de cleanup. Não o engula silenciosamente:
+um socket que não fecha ou uma subscription que falha ao cancelar pode indicar
+perda de dados. Em uma aplicação Flutter, forneça `onRuntimeCloseError` para
+encaminhar a falha ao mecanismo de observabilidade da app.
+
+## O que não fazer
+
+```dart
+class OrdersScreenState extends State<OrdersScreen> {
+  final client = ApiClientHttp(); // owner indefinido
+
+  @override
+  void dispose() {
+    client.close(); // Future ignorado e ownership misturado com a UI
+    super.dispose();
+  }
+}
+```
+
+O problema não é fechar no `dispose` em si; é uma tela ter criado um recurso que
+deveria ser compartilhado e ainda ignorar o resultado do cleanup. Mova a
+criação para o Module e deixe o owner do Runtime cuidar da duração. Para um
+recurso realmente local, use `use.acquire` e deixe o Scope registrar o release.
+
+Veja também o [modelo mental](../getting-started/mental-model) e o tutorial de
+[primeira feature](../getting-started/first-feature).
