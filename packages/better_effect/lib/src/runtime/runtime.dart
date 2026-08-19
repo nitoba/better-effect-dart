@@ -12,49 +12,166 @@ enum RuntimeState {
   closed,
 }
 
+final class _CancellationRequested implements Exception {
+  const _CancellationRequested();
+}
+
 /// A cooperative cancellation signal exposed to an active Effect.
 ///
 /// A signal request does not cancel arbitrary Dart Futures. Code using a
-/// cancellable API can observe [isCancelled] or await [whenCancelled].
+/// cancellable API can observe [isCancelled], await [whenCancelled], or call
+/// [throwIfCancelled] at a cooperative boundary.
 final class CancellationSignal {
   CancellationSignal._();
 
   final Completer<void> _whenCancelled = Completer<void>.sync();
   bool _isCancelled = false;
+  Object? _reason;
 
   /// Whether cancellation has been requested.
   bool get isCancelled => _isCancelled;
 
+  /// The first cancellation reason supplied by the execution owner.
+  Object? get reason => _reason;
+
   /// Completes when cancellation is requested.
   Future<void> get whenCancelled => _whenCancelled.future;
 
-  void _cancel() {
+  /// Stop at this cooperative boundary when cancellation was requested.
+  void throwIfCancelled() {
     if (_isCancelled) {
-      return;
+      throw const _CancellationRequested();
+    }
+  }
+
+  bool _cancel(Object? reason) {
+    if (_isCancelled) {
+      return false;
     }
 
     _isCancelled = true;
+    _reason = reason;
     _whenCancelled.complete();
+    return true;
   }
 }
 
-final class _ActiveExecution {
-  _ActiveExecution({required this.id, required this.scope, required this.label})
-    : cancellation = CancellationSignal._();
+/// A managed handle for one Effect execution.
+///
+/// [exit] is the caller-visible logical result. [isRunning] describes physical
+/// ownership, which can remain true after interruption while an arbitrary Dart
+/// Future finishes and its Scope is cleaned up.
+abstract interface class EffectExecution<A extends Object, E extends Object> {
+  /// Monotonically increasing identifier within the owning Runtime.
+  int get id;
 
+  /// Optional diagnostic label supplied when execution started.
+  String? get label;
+
+  /// Whether physical work or Scope cleanup is still owned by the Runtime.
+  bool get isRunning;
+
+  /// Whether cooperative interruption has been requested.
+  bool get isInterrupted;
+
+  /// The caller-visible success, typed failure, defect, or interruption.
+  Future<Exit<A, E>> get exit;
+
+  /// Request cooperative interruption.
+  ///
+  /// The logical [exit] becomes [ExitInterrupted] immediately when no previous
+  /// outcome was published. Physical work remains owned until it finishes.
+  /// Returns false when interruption was already requested or physical work has
+  /// completed.
+  bool interrupt({Object? reason});
+}
+
+abstract interface class _RuntimeExecution {
+  int get id;
+  String? get label;
+  Scope get scope;
+  CancellationSignal get cancellation;
+  Future<void> get completed;
+  bool get isCompleted;
+  void requestInterruption(Object? reason);
+}
+
+final class _EffectExecutionImpl<A extends Object, E extends Object>
+    implements EffectExecution<A, E>, _RuntimeExecution {
+  _EffectExecutionImpl({
+    required this.id,
+    required this.scope,
+    required this.label,
+  }) : cancellation = CancellationSignal._();
+
+  @override
   final int id;
-  final Scope scope;
-  final String? label;
-  final CancellationSignal cancellation;
-  final Completer<void> _completed = Completer<void>.sync();
 
+  @override
+  final Scope scope;
+
+  @override
+  final String? label;
+
+  @override
+  final CancellationSignal cancellation;
+
+  final Completer<Exit<A, E>> _exit = Completer<Exit<A, E>>.sync();
+  final Completer<void> _completed = Completer<void>.sync();
+  Exit<A, E>? _publishedExit;
+
+  @override
+  Future<Exit<A, E>> get exit => _exit.future;
+
+  @override
   Future<void> get completed => _completed.future;
 
+  @override
   bool get isCompleted => _completed.isCompleted;
 
-  void interrupt() => cancellation._cancel();
+  @override
+  bool get isRunning => !isCompleted;
 
-  void complete() {
+  @override
+  bool get isInterrupted => cancellation.isCancelled;
+
+  bool get hasPublishedExit => _exit.isCompleted;
+
+  Exit<A, E>? get publishedExit => _publishedExit;
+
+  @override
+  bool interrupt({Object? reason}) {
+    if (isCompleted || !cancellation._cancel(reason)) {
+      return false;
+    }
+
+    completeLogical(ExitInterrupted<A, E>());
+    return true;
+  }
+
+  @override
+  void requestInterruption(Object? reason) {
+    cancellation._cancel(reason);
+  }
+
+  void completeLogical(Exit<A, E> value) {
+    if (_exit.isCompleted) {
+      return;
+    }
+
+    _publishedExit = value;
+    _exit.complete(value);
+  }
+
+  void completeLogicalError(Object error, StackTrace stackTrace) {
+    if (_exit.isCompleted) {
+      return;
+    }
+
+    _exit.completeError(error, stackTrace);
+  }
+
+  void completePhysical() {
     if (!_completed.isCompleted) {
       _completed.complete();
     }
@@ -67,9 +184,7 @@ final class Runtime {
 
   final _RuntimeContext _rootContext;
   final CleanupFailureObserver? _cleanupFailureObserver;
-  // ponytail: tracks awaited execution Futures; detached child Futures need
-  // explicit cancellation or lease tracking if that ceiling becomes a bug.
-  final Set<_ActiveExecution> _activeExecutions = <_ActiveExecution>{};
+  final Set<_RuntimeExecution> _activeExecutions = <_RuntimeExecution>{};
   final List<ReleaseFailure> _deferredExecutionFailures = <ReleaseFailure>[];
   int _nextExecutionId = 0;
   RuntimeState _state = RuntimeState.active;
@@ -174,6 +289,29 @@ final class Runtime {
   /// Whether this Runtime no longer accepts new work.
   bool get isClosed => _state != RuntimeState.active;
 
+  /// Start a managed Effect execution.
+  EffectExecution<A, E> execute<A extends Object, E extends Object>(
+    Effect<A, E> effect, {
+    String? label,
+  }) {
+    _ensureActive();
+
+    final execution = _EffectExecutionImpl<A, E>(
+      id: ++_nextExecutionId,
+      scope: _rootContext.scope._fork(),
+      label: label,
+    );
+    _activeExecutions.add(execution);
+    final context = _rootContext._withScope(
+      execution.scope,
+      cancellation: execution.cancellation,
+    );
+
+    unawaited(_runExecution(effect, context, execution));
+
+    return execution;
+  }
+
   /// Run an Effect and convert unexpected defects back into thrown errors.
   Future<ResultDart<A, E>> run<A extends Object, E extends Object>(
     Effect<A, E> effect, {
@@ -188,80 +326,78 @@ final class Runtime {
     Effect<A, E> effect, {
     String? executionLabel,
   }) {
-    _ensureActive();
-
-    final execution = _ActiveExecution(
-      id: ++_nextExecutionId,
-      scope: _rootContext.scope._fork(),
-      label: executionLabel,
-    );
-    _activeExecutions.add(execution);
-    final context = _rootContext._withScope(
-      execution.scope,
-      cancellation: execution.cancellation,
-    );
-    final logicalExit = Completer<Exit<A, E>>.sync();
-
-    unawaited(_runExecution(effect, context, execution, logicalExit));
-
-    return logicalExit.future;
+    return execute(effect, label: executionLabel).exit;
   }
 
   Future<void> _runExecution<A extends Object, E extends Object>(
     Effect<A, E> effect,
     _RuntimeContext context,
-    _ActiveExecution execution,
-    Completer<Exit<A, E>> logicalExit,
+    _EffectExecutionImpl<A, E> execution,
   ) async {
     try {
-      Exit<A, E> exit;
+      Exit<A, E> computedExit;
 
       try {
         final result = await effect._run(context);
-        exit = result.fold<Exit<A, E>>(
+        computedExit = result.fold<Exit<A, E>>(
           (value) => ExitSuccess<A, E>(value),
           (error) => ExitFailure<A, E>(error),
         );
+      } on _CancellationRequested {
+        computedExit = ExitInterrupted<A, E>();
       } catch (error, stackTrace) {
-        exit = ExitDefect<A, E>(error, stackTrace);
+        computedExit = ExitDefect<A, E>(error, stackTrace);
       }
 
-      if (execution.scope._hasPendingPhysical) {
-        // Deliver the logical result now; Scope._close waits for the physical
-        // operation before releasing execution resources.
-        logicalExit.complete(exit);
+      final wasPublished = execution.hasPublishedExit;
+      final outcome = execution.publishedExit ?? computedExit;
+
+      if (wasPublished && computedExit is ExitDefect<A, E>) {
+        _recordDeferredExecutionFailure(
+          computedExit.defect,
+          computedExit.stackTrace,
+        );
+      }
+
+      if (execution.scope._hasPendingPhysical || wasPublished) {
+        if (!wasPublished) {
+          execution.completeLogical(computedExit);
+        }
 
         try {
-          await execution.scope._close(exit);
+          await execution.scope._close(outcome);
         } catch (error, stackTrace) {
           await _reportCleanupFailure(
             _asScopeReleaseException(error, stackTrace),
-            exit,
+            outcome,
             execution: execution,
           );
           _recordDeferredExecutionFailure(error, stackTrace);
         }
       } else {
-        logicalExit.complete(
-          await _closeExecutionScope(execution.scope, exit, execution),
+        final closedExit = await _closeExecutionScope(
+          execution.scope,
+          outcome,
+          execution,
         );
+        execution.completeLogical(closedExit);
       }
     } catch (error, stackTrace) {
-      if (logicalExit.isCompleted) {
+      if (execution.hasPublishedExit) {
         _recordDeferredExecutionFailure(error, stackTrace);
       } else {
-        logicalExit.completeError(error, stackTrace);
+        execution.completeLogicalError(error, stackTrace);
       }
     } finally {
       _activeExecutions.remove(execution);
-      execution.complete();
+      execution.completePhysical();
     }
   }
 
   Future<Exit<A, E>> _closeExecutionScope<A extends Object, E extends Object>(
     Scope scope,
     Exit<A, E> exit,
-    _ActiveExecution execution,
+    _RuntimeExecution execution,
   ) async {
     try {
       await scope._close(exit);
@@ -296,7 +432,7 @@ final class Runtime {
   Future<void> _reportCleanupFailure(
     ScopeReleaseException error,
     Exit<Object, Object> outcome, {
-    required _ActiveExecution execution,
+    required _RuntimeExecution execution,
   }) {
     return _notifyCleanupFailureBestEffort(
       _cleanupFailureObserver,
@@ -431,7 +567,7 @@ final class Runtime {
     required Duration gracePeriod,
     required bool interruptAfterGracePeriod,
   }) async {
-    final executions = List<_ActiveExecution>.of(_activeExecutions);
+    final executions = List<_RuntimeExecution>.of(_activeExecutions);
     if (executions.isEmpty) {
       return;
     }
@@ -448,7 +584,7 @@ final class Runtime {
 
       for (final execution in executions) {
         if (!execution.isCompleted) {
-          execution.interrupt();
+          execution.requestInterruption('runtime-shutdown');
         }
       }
     }
