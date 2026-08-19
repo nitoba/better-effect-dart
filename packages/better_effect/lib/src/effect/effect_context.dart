@@ -37,10 +37,11 @@ abstract interface class EffectContext<E extends Object> {
   /// Read the current value of an [EffectLocal].
   T local<T extends Object>(EffectLocal<T> local);
 
-  /// Acquire a resource and register its release callback in the current scope.
+  /// Acquire a resource and register its outcome-aware release callback in the
+  /// current Scope.
   Future<R> acquire<R extends Object, F extends E>(
     Effect<R, F> acquisition, {
-    required FutureOr<void> Function(R resource) release,
+    required ResourceRelease<R> release,
   });
 }
 
@@ -109,11 +110,8 @@ final class _EffectContext<E extends Object> implements EffectContext<E> {
   @override
   Future<R> acquire<R extends Object, F extends E>(
     Effect<R, F> acquisition, {
-    required FutureOr<void> Function(R resource) release,
-  }) async {
-    return _runtime.scope._acquire(
-      () => unwrap(acquisition),
-      (resource, _) => release(resource),
-    );
+    required ResourceRelease<R> release,
+  }) {
+    return _runtime.scope._acquire(() => unwrap(acquisition), release);
   }
 }

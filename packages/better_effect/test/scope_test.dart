@@ -18,6 +18,163 @@ final class AuthenticationFailure implements Exception {
 }
 
 void main() {
+  group('Scope ownership', () {
+    const outcome = ExitInterrupted<Object, Object>();
+
+    test('closes children and finalizers in reverse creation order', () async {
+      final events = <String>[];
+      final root = Scope.make();
+      final first = root.fork();
+      final second = root.fork();
+      final grandchild = second.fork();
+
+      root.addFinalizer((_) => events.add('root'));
+      first.addFinalizer((_) => events.add('first'));
+      second.addFinalizer((_) => events.add('second'));
+      grandchild.addFinalizer((_) => events.add('grandchild'));
+
+      await root.close(outcome);
+
+      expect(events, ['grandchild', 'second', 'first', 'root']);
+    });
+
+    test('concurrent close callers share the same completion', () async {
+      final scope = Scope.make();
+      final gate = Completer<void>();
+      scope.addFinalizer((_) => gate.future);
+
+      final first = scope.close(outcome);
+      final second = scope.close(outcome);
+
+      expect(identical(first, second), isTrue);
+
+      gate.complete();
+      await first;
+    });
+
+    test('release receives the outcome that closes the Scope', () async {
+      final scope = Scope.make();
+      final expected = ExitFailure<Object, Object>(
+        const AuthenticationFailure(),
+      );
+      Exit<Object, Object>? observed;
+
+      await scope.acquire(() => const Resource('scoped'), (_, exit) {
+        observed = exit;
+      });
+
+      await scope.close(expected);
+
+      expect(observed, same(expected));
+    });
+
+    test('releases an acquisition that completes after close begins', () async {
+      final scope = Scope.make();
+      final started = Completer<void>();
+      final continueAcquisition = Completer<void>();
+      Exit<Object, Object>? observed;
+      var released = false;
+
+      final acquisition = scope.acquire(
+        () async {
+          started.complete();
+          await continueAcquisition.future;
+          return const Resource('late');
+        },
+        (_, exit) {
+          released = true;
+          observed = exit;
+        },
+      );
+
+      await started.future;
+      final closing = scope.close(outcome);
+      continueAcquisition.complete();
+
+      await expectLater(acquisition, throwsA(isA<ScopeClosedException>()));
+      await closing;
+
+      expect(released, isTrue);
+      expect(observed, same(outcome));
+    });
+
+    test('preserves registration and immediate release failures', () async {
+      final scope = Scope.make();
+      final started = Completer<void>();
+      final continueAcquisition = Completer<void>();
+
+      final acquisition = scope.acquire(() async {
+        started.complete();
+        await continueAcquisition.future;
+        return const Resource('late');
+      }, (_, _) => throw const CleanupError());
+
+      await started.future;
+      final closing = scope.close(outcome);
+      continueAcquisition.complete();
+
+      await expectLater(acquisition, throwsA(isA<CompositeDefect>()));
+      await closing;
+    });
+
+    test('aggregates failures from children and finalizers', () async {
+      final root = Scope.make();
+      final child = root.fork();
+
+      root.addFinalizer((_) => throw StateError('root:first'));
+      root.addFinalizer((_) => throw StateError('root:second'));
+      child.addFinalizer((_) => throw StateError('child'));
+
+      await expectLater(
+        root.close(outcome),
+        throwsA(
+          isA<ScopeReleaseException>().having(
+            (error) => error.failures,
+            'failures',
+            hasLength(3),
+          ),
+        ),
+      );
+    });
+
+    test('a closed child detaches from its parent', () async {
+      final root = Scope.make();
+      final child = root.fork();
+      var releases = 0;
+
+      child.addFinalizer((_) {
+        releases++;
+      });
+
+      await child.close(outcome);
+      await root.close(outcome);
+
+      expect(releases, 1);
+    });
+
+    test('rejects new work after close begins', () async {
+      final scope = Scope.make();
+      var acquisitionAttempted = false;
+
+      await scope.close(outcome);
+
+      expect(scope.fork, throwsA(isA<ScopeClosedException>()));
+      expect(
+        () => scope.addFinalizer((_) {}),
+        throwsA(isA<ScopeClosedException>()),
+      );
+      await expectLater(
+        scope.acquire(() {
+          acquisitionAttempted = true;
+          return const Resource('unexpected');
+        }, (_, _) {}),
+        throwsA(isA<ScopeClosedException>()),
+      );
+
+      expect(acquisitionAttempted, isFalse);
+    });
+  });
+
   test('module resources are released in reverse acquisition order', () async {
     final events = <String>[];
 
@@ -27,7 +184,7 @@ void main() {
           events.add('acquire:first');
           return const Resource('first');
         },
-        release: (resource) async {
+        release: (resource, _) async {
           events.add('release:${resource.name}');
         },
         key: const ServiceKey<Resource>('first'),
@@ -37,7 +194,7 @@ void main() {
           events.add('acquire:second');
           return const Resource('second');
         },
-        release: (resource) async {
+        release: (resource, _) async {
           events.add('release:${resource.name}');
         },
         key: const ServiceKey<Resource>('second'),
@@ -64,7 +221,7 @@ void main() {
       final effect = Effect<String, Never>.result((use) async {
         final resource = await use.acquire(
           Effect<Resource, Never>.succeed(const Resource('execution')),
-          release: (_) async {
+          release: (_, _) async {
             released = true;
           },
         );
@@ -97,7 +254,7 @@ void main() {
             Effect<Resource, AuthenticationFailure>.succeed(
               const Resource('execution'),
             ),
-            release: (_) => throw const CleanupError(),
+            release: (_, _) => throw const CleanupError(),
           );
           use.fail(const AuthenticationFailure());
         }),
@@ -126,7 +283,7 @@ void main() {
         Effect<String, Never>.result((use) async {
           return (await use.acquire(
             Effect<Resource, Never>.succeed(const Resource('execution')),
-            release: (_) => throw const CleanupError(),
+            release: (_, _) => throw const CleanupError(),
           )).name;
         }),
       );
@@ -151,7 +308,7 @@ void main() {
         Effect<String, Never>.result((use) async {
           await use.acquire(
             Effect<Resource, Never>.succeed(const Resource('execution')),
-            release: (_) => throw const CleanupError(),
+            release: (_, _) => throw const CleanupError(),
           );
           throw const AuthenticationFailure();
         }),
@@ -177,7 +334,7 @@ void main() {
           await Module([
             .resource<Resource>(
               acquire: (_) async => const Resource('runtime'),
-              release: (_) => throw const CleanupError(),
+              release: (_, _) => throw const CleanupError(),
             ),
           ]).runExit(
             Effect<String, AuthenticationFailure>.fail(
@@ -207,7 +364,7 @@ void main() {
             events.add('acquire:runtime');
             return const Resource('runtime');
           },
-          release: (_) async {
+          release: (_, _) async {
             events.add('release:runtime');
           },
         ),
@@ -222,7 +379,7 @@ void main() {
           events.add('resolve:after-closing');
           await use.acquire(
             Effect<Resource, Never>.succeed(const Resource('execution')),
-            release: (_) async {
+            release: (_, _) async {
               events.add('release:execution');
             },
           );
@@ -275,7 +432,7 @@ void main() {
             events.add('acquire:runtime');
             return const Resource('runtime');
           },
-          release: (_) async {
+          release: (_, _) async {
             events.add('release:runtime');
           },
         ),
@@ -286,7 +443,7 @@ void main() {
         Effect<Unit, Never>.result((use) async {
           await use.acquire(
             Effect<Resource, Never>.succeed(const Resource('execution')),
-            release: (_) async {
+            release: (_, _) async {
               events.add('release:execution');
             },
           );
@@ -357,7 +514,7 @@ void main() {
               await continueAcquisition.future;
               return const Resource('late');
             }),
-            release: (_) async {
+            release: (_, _) async {
               released = true;
             },
           );
@@ -395,7 +552,7 @@ void main() {
             await continueAcquisition.future;
             return const Resource('late');
           }),
-          release: (_) => throw const CleanupError(),
+          release: (_, _) => throw const CleanupError(),
         );
 
         return resource.name;
