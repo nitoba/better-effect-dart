@@ -138,19 +138,21 @@ sealed class EffectCommandBase<A extends Object, E extends Object>
   /// Whether running/failure/defect/interrupted states retain the latest data.
   final bool keepPreviousData;
 
-  /// Optional diagnostic name included in global transitions and error reports.
+  /// Optional diagnostic name included in global transitions and Runtime
+  /// execution metadata.
   final String? debugLabel;
 
-  /// Optional cooperative cancellation hook.
+  /// Optional adapter hook invoked after core interruption is requested.
   ///
-  /// Use this to signal a token owned by Dio, an isolate, a download manager, or
-  /// another cancellable API. An arbitrary Dart Future cannot be forcefully
-  /// cancelled by the command itself.
+  /// Use this to bridge a token owned by Dio, an isolate, a download manager, or
+  /// another API that has its own cancellation protocol. The core
+  /// [EffectExecution] remains the primary lifecycle owner.
   final VoidCallback? onCancel;
 
   EffectCommandState<A, E> _value;
   Future<Exit<A, E>>? _inFlight;
   Completer<Exit<A, E>>? _activeCompleter;
+  EffectExecution<A, E>? _activeRuntimeExecution;
 
   int _revision = 0;
   int _nextExecutionId = 0;
@@ -191,11 +193,11 @@ sealed class EffectCommandBase<A extends Object, E extends Object>
   /// Latest successful value, even after a later failure.
   A? get lastSuccess => _lastSuccess;
 
-  /// Executions still running in Dart plus queued execution count.
+  /// Caller-visible executions that have not completed plus queued invocations.
   ///
-  /// With [EffectCommandConcurrency.latest], this can be greater than one even
-  /// after the newest execution has already produced visible state, because
-  /// stale Futures are allowed to finish without overwriting that state.
+  /// Interrupted physical work can remain owned by the Runtime after it leaves
+  /// this count. [EffectCommandConcurrency.latest] can also have stale physical
+  /// executions that no longer own visible Command state.
   int get pendingCount => _pendingCompletions.length + _queue.length;
 
   /// Number of executions waiting behind the authoritative execution.
@@ -215,11 +217,10 @@ sealed class EffectCommandBase<A extends Object, E extends Object>
 
   /// Interrupt ownership of the current execution.
   ///
-  /// Returns false when no authoritative execution is active. The underlying
-  /// Future is not forcefully stopped; [onCancel] can perform cooperative
-  /// cancellation. Its eventual completion is ignored by this command, while
-  /// the Future returned by [EffectCommand0.execute] or [EffectCommand.execute]
-  /// completes with [ExitInterrupted].
+  /// Returns false when no authoritative execution is active. The Runtime
+  /// receives cooperative interruption through [EffectExecution.interrupt]. The
+  /// caller-visible Command Future completes with [ExitInterrupted] while
+  /// physical work remains Runtime-owned until it finishes.
   ///
   /// When [clearQueued] is true, queued executions complete as interrupted
   /// without starting. When false, the next queued operation starts immediately.
@@ -235,10 +236,12 @@ sealed class EffectCommandBase<A extends Object, E extends Object>
     }
 
     final completion = _activeCompleter;
+    final runtimeExecution = _activeRuntimeExecution;
 
     _activeExecutionId = null;
     _inFlight = null;
     _activeCompleter = null;
+    _activeRuntimeExecution = null;
     _pendingCompletions.remove(executionId);
 
     try {
@@ -259,6 +262,7 @@ sealed class EffectCommandBase<A extends Object, E extends Object>
           previous: _retainedData,
         ),
       );
+      runtimeExecution?.interrupt(reason: 'command-cancelled');
 
       if (clearQueued) {
         _interruptQueued();
@@ -268,6 +272,7 @@ sealed class EffectCommandBase<A extends Object, E extends Object>
       return true;
     }
 
+    runtimeExecution?.interrupt(reason: 'command-cancelled');
     final interrupted = ExitInterrupted<A, E>();
     _lastExit = interrupted;
     if (completion != null && !completion.isCompleted) {
@@ -301,11 +306,15 @@ sealed class EffectCommandBase<A extends Object, E extends Object>
     }
 
     final hadActiveExecution = _activeExecutionId != null && _inFlight != null;
+    final runtimeExecution = _activeRuntimeExecution;
 
     _disposed = true;
     _activeExecutionId = null;
     _inFlight = null;
     _activeCompleter = null;
+    _activeRuntimeExecution = null;
+
+    runtimeExecution?.interrupt(reason: 'command-disposed');
 
     for (final completion in _pendingCompletions.values) {
       if (!completion.isCompleted) {
@@ -435,14 +444,21 @@ sealed class EffectCommandBase<A extends Object, E extends Object>
     Exit<A, E> exit;
 
     try {
-      exit = await _runtime.runExit(createEffect());
+      final runtimeExecution = _runtime.execute(
+        createEffect(),
+        label: debugLabel,
+      );
+      if (_owns(executionId)) {
+        _activeRuntimeExecution = runtimeExecution;
+      }
+      exit = await runtimeExecution.exit;
     } catch (error, stackTrace) {
       exit = ExitDefect<A, E>(error, stackTrace);
     }
 
-    // `latest`, interruption, and disposal can revoke ownership while the Dart
-    // Future continues. Callers still receive the Exit, but stale work cannot
-    // overwrite the command's visible state.
+    // `latest`, interruption, and disposal can revoke ownership while physical
+    // work continues in the Runtime. Callers still receive the logical Exit, but
+    // stale work cannot overwrite the Command's visible state.
     if (!_owns(executionId)) {
       return exit;
     }
@@ -597,6 +613,7 @@ sealed class EffectCommandBase<A extends Object, E extends Object>
       if (!_disposed && _activeExecutionId == executionId) {
         _inFlight = null;
         _activeCompleter = null;
+        _activeRuntimeExecution = null;
         _activeExecutionId = null;
         _startNextQueuedIfPossible();
       }
