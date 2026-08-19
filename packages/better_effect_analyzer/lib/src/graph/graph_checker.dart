@@ -283,6 +283,9 @@ final class _ProjectIndex {
           );
         }
 
+        // Updating an existing LinkedHashMap key preserves its position. This
+        // mirrors Module.overrideWith: replacements stay where the base binding
+        // was declared, while new identities are appended.
         flattened[identity] = provider;
       }
 
@@ -322,6 +325,7 @@ final class _ProjectIndex {
       }
     }
 
+    yield* _validateResourceStartupOrder(root, flattened);
     yield* _findCycles(root, flattened);
   }
 
@@ -340,6 +344,74 @@ final class _ProjectIndex {
     }
 
     return dependencies;
+  }
+
+  Iterable<GraphDiagnostic> _validateResourceStartupOrder(
+    _ModuleInfo root,
+    Map<String, _ProviderInfo> providers,
+  ) sync* {
+    final ordered = providers.values.toList();
+    final positions = <String, int>{
+      for (var index = 0; index < ordered.length; index++)
+        ordered[index].service.identity: index,
+    };
+    final emitted = <String>{};
+
+    Iterable<GraphDiagnostic> visit(
+      _ProviderInfo owner,
+      _ProviderInfo current,
+      List<_ServiceRef> path,
+      Set<String> visiting,
+    ) sync* {
+      for (final dependency in _providerDependencies(current)) {
+        final target = providers[dependency.identity];
+        if (target == null) continue;
+
+        final nextPath = <_ServiceRef>[...path, dependency];
+        final ownerPosition = positions[owner.service.identity]!;
+        final targetPosition = positions[target.service.identity]!;
+
+        if (target.isResource && targetPosition > ownerPosition) {
+          final signature =
+              '${owner.service.identity}->${target.service.identity}';
+          if (emitted.add(signature)) {
+            final displayPath = nextPath
+                .map((service) => service.display)
+                .join(' -> ');
+            yield _diagnostic(
+              code: 'resource_dependency_declared_after_provider',
+              message:
+                  "Resource '${owner.service.display}' requires "
+                  "'${target.service.display}' during startup, but that "
+                  "resource is acquired later in Module '${root.name}'. "
+                  'Dependency path: $displayPath.',
+              location: dependency.location ?? owner.location,
+            );
+          }
+          continue;
+        }
+
+        // A resource already acquired before the owner has a valid startup
+        // state. Constructor-backed providers still need traversal because they
+        // can hide a transitive dependency on a later resource.
+        if (target.isResource || !visiting.add(target.service.identity)) {
+          continue;
+        }
+
+        yield* visit(owner, target, nextPath, visiting);
+        visiting.remove(target.service.identity);
+      }
+    }
+
+    for (final provider in ordered) {
+      if (!provider.isResource) continue;
+      yield* visit(
+        provider,
+        provider,
+        <_ServiceRef>[provider.service],
+        <String>{provider.service.identity},
+      );
+    }
   }
 
   Iterable<GraphDiagnostic> _findCycles(
@@ -625,6 +697,7 @@ final class _UnitCollector extends RecursiveAstVisitor<void> {
           : _ServiceRef.fromType(implementationType),
       constructorDependencies: constructorDependencies,
       inlineDependencies: inlineDependencies,
+      isResource: binding.name == 'resource',
       location: _location(binding.nameNode.offset, binding.nameNode.length),
       typeSystem: result.typeSystem,
     );
@@ -713,6 +786,7 @@ final class _ProviderInfo {
     required this.implementation,
     required this.constructorDependencies,
     required this.inlineDependencies,
+    required this.isResource,
     required this.location,
     required this.typeSystem,
   });
@@ -721,6 +795,7 @@ final class _ProviderInfo {
   final _ServiceRef? implementation;
   final Set<_ServiceRef> constructorDependencies;
   final Set<_ServiceRef> inlineDependencies;
+  final bool isResource;
   final _SourceLocation location;
   final TypeSystem typeSystem;
 }
