@@ -10,8 +10,7 @@ void main() {
 }
 
 @reflectiveTest
-final class UnawaitedEffectContextOperationTest
-    extends BetterEffectRuleTest {
+final class UnawaitedEffectContextOperationTest extends BetterEffectRuleTest {
   @override
   void setUp() {
     rule = UnawaitedEffectContextOperationRule();

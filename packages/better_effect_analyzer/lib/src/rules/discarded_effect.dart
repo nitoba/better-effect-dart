@@ -10,7 +10,7 @@ import '../support/type_utils.dart';
 /// Reports lazy Effects that are created and immediately discarded.
 final class DiscardedEffectRule extends AnalysisRule {
   DiscardedEffectRule()
-      : super(name: code.name, description: code.problemMessage);
+    : super(name: code.name, description: code.problemMessage);
 
   static const code = LintCode(
     'discarded_effect',

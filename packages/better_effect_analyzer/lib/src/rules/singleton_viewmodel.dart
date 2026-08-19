@@ -11,7 +11,7 @@ import '../support/type_utils.dart';
 /// Warns when a ViewModel is registered for the whole application lifetime.
 final class SingletonViewModelRule extends AnalysisRule {
   SingletonViewModelRule()
-      : super(name: code.name, description: code.problemMessage);
+    : super(name: code.name, description: code.problemMessage);
 
   static const code = LintCode(
     'singleton_viewmodel',
@@ -64,9 +64,6 @@ final class _Visitor extends SimpleAstVisitor<void> {
 
     if (viewModelType == null) return;
 
-    rule.reportAtNode(
-      call.nameNode,
-      arguments: [typeDisplay(viewModelType)],
-    );
+    rule.reportAtNode(call.nameNode, arguments: [typeDisplay(viewModelType)]);
   }
 }

@@ -34,10 +34,9 @@ final class BookingRepositoryLive implements BookingRepository {
 ''';
 
     final offset = source.indexOf('use<UserRepository>()');
-    await assertDiagnostics(
-      source,
-      [lint(offset, 'use<UserRepository>()'.length)],
-    );
+    await assertDiagnostics(source, [
+      lint(offset, 'use<UserRepository>()'.length),
+    ]);
   }
 
   Future<void> test_reportsDotShorthandStaticServiceRequest() async {
@@ -53,10 +52,9 @@ final class BookingRepositoryLive implements BookingRepository {
 ''';
 
     final offset = source.indexOf('.service<UserRepository>()');
-    await assertDiagnostics(
-      source,
-      [lint(offset, '.service<UserRepository>()'.length)],
-    );
+    await assertDiagnostics(source, [
+      lint(offset, '.service<UserRepository>()'.length),
+    ]);
   }
 
   Future<void> test_allowsOwnRepositoryContractRequest() async {

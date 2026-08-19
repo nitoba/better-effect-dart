@@ -12,7 +12,7 @@ import '../support/type_utils.dart';
 /// service contract in its type argument.
 final class IncompatibleProviderRule extends AnalysisRule {
   IncompatibleProviderRule()
-      : super(name: code.name, description: code.problemMessage);
+    : super(name: code.name, description: code.problemMessage);
 
   static const code = LintCode(
     'incompatible_provider',
@@ -70,10 +70,7 @@ final class _Visitor extends SimpleAstVisitor<void> {
     if (!compatible) {
       rule.reportAtNode(
         call.implementationNode,
-        arguments: [
-          typeDisplay(implementationType),
-          typeDisplay(serviceType),
-        ],
+        arguments: [typeDisplay(implementationType), typeDisplay(serviceType)],
       );
     }
   }
