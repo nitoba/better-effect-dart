@@ -186,10 +186,24 @@ final class _ResourceBinding<T extends Object> extends Binding {
 
   @override
   Future<void> _startResource(_RuntimeContext context) async {
-    final value = await context.scope._acquire(
-      () => Future<T>.sync(() => acquire(Services._(context))),
-      release,
-    );
+    late T value;
+
+    try {
+      value = await context.scope._acquire(
+        () => Future<T>.sync(() => acquire(Services._(context))),
+        release,
+      );
+    } catch (error, stackTrace) {
+      Error.throwWithStackTrace(
+        ResourceAcquisitionException(
+          serviceType: T,
+          key: key?.name,
+          cause: error,
+          causeStackTrace: stackTrace,
+        ),
+        stackTrace,
+      );
+    }
 
     context.backend.registerInstance<T>(value, key: key?._backendKey);
   }

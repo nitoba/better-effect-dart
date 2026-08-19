@@ -8,6 +8,10 @@
 - Resource release callbacks now receive the `Exit` that closed their Scope.
 - Module resources and `EffectContext.acquire` now share the same Scope
   acquisition lifecycle.
+- `Module.overrideWith` now replaces existing bindings in place and appends only
+  new service identities, preserving resource startup and reverse cleanup order.
+- Resource acquisition defects now identify the resource service and optional
+  key while preserving the original dependency-resolution cause.
 
 ## 0.1.1
 

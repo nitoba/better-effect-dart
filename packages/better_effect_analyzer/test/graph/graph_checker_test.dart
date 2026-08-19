@@ -82,6 +82,44 @@ void main() {
 
       expect(result.diagnostics, isEmpty);
     });
+
+    test('reports a resource dependency acquired later', () async {
+      _writeResourceSource(app, databaseFirst: false);
+
+      final result = await BetterEffectGraphChecker(app.path).check();
+      final diagnostic = result.diagnostics.singleWhere(
+        (item) => item.code == 'resource_dependency_declared_after_provider',
+      );
+
+      expect(diagnostic.message, contains("Resource 'ReportResource'"));
+      expect(diagnostic.message, contains("requires 'Database'"));
+      expect(diagnostic.message, contains('ReportResource -> Database'));
+    });
+
+    test('accepts a resource dependency acquired earlier', () async {
+      _writeResourceSource(app, databaseFirst: true);
+
+      final result = await BetterEffectGraphChecker(app.path).check();
+
+      expect(
+        result.diagnostics.map((diagnostic) => diagnostic.code),
+        isNot(contains('resource_dependency_declared_after_provider')),
+      );
+    });
+
+    test('reports a transitive later resource dependency', () async {
+      _writeTransitiveResourceSource(app);
+
+      final result = await BetterEffectGraphChecker(app.path).check();
+      final diagnostic = result.diagnostics.singleWhere(
+        (item) => item.code == 'resource_dependency_declared_after_provider',
+      );
+
+      expect(
+        diagnostic.message,
+        contains('ReportResource -> Repository -> Database'),
+      );
+    });
   });
 }
 
@@ -163,6 +201,12 @@ sealed class Binding {
     Lifetime lifetime = Lifetime.lazySingleton,
     ServiceKey<T>? key,
   }) => const _Binding();
+
+  static Binding resource<T extends Object>({
+    required FutureOr<T> Function(Services services) acquire,
+    required FutureOr<void> Function(T value) release,
+    ServiceKey<T>? key,
+  }) => const _Binding();
 }
 
 final class _Binding extends Binding {
@@ -207,6 +251,73 @@ final class UserRepositoryLive implements UserRepository {
 
 final appModule = Module([
 $moduleBindings
+]);
+''');
+}
+
+void _writeResourceSource(Directory app, {required bool databaseFirst}) {
+  final source = File(p.join(app.path, 'lib', 'app.dart'))
+    ..parent.createSync(recursive: true);
+  final database = '''
+  .resource<Database>(
+    acquire: (_) async => DatabaseLive(),
+    release: (_) async {},
+  ),
+''';
+  final report = '''
+  .resource<ReportResource>(
+    acquire: (services) async {
+      services<Database>();
+      return ReportResource();
+    },
+    release: (_) async {},
+  ),
+''';
+
+  source.writeAsStringSync('''
+import 'package:better_effect/better_effect.dart';
+
+abstract interface class Database {}
+final class DatabaseLive implements Database {}
+final class ReportResource {}
+
+final appModule = Module([
+${databaseFirst ? database : report}
+${databaseFirst ? report : database}
+]);
+''');
+}
+
+void _writeTransitiveResourceSource(Directory app) {
+  final source = File(p.join(app.path, 'lib', 'app.dart'))
+    ..parent.createSync(recursive: true);
+
+  source.writeAsStringSync('''
+import 'package:better_effect/better_effect.dart';
+
+abstract interface class Database {}
+final class DatabaseLive implements Database {}
+
+final class Repository {
+  Repository(this.database);
+  final Database database;
+}
+
+final class ReportResource {}
+
+final appModule = Module([
+  .resource<ReportResource>(
+    acquire: (services) async {
+      services<Repository>();
+      return ReportResource();
+    },
+    release: (_) async {},
+  ),
+  .provide<Repository>(Repository.new),
+  .resource<Database>(
+    acquire: (_) async => DatabaseLive(),
+    release: (_) async {},
+  ),
 ]);
 ''');
 }

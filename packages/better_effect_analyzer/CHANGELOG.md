@@ -1,3 +1,11 @@
+## Unreleased
+
+- Added `resource_dependency_declared_after_provider` to detect direct and
+  transitive resource dependencies that are acquired too late during Module
+  startup.
+- Aligned graph override flattening with the core's stable in-place replacement
+  semantics.
+
 ## 0.1.3
 
 - Expanded the package documentation with plugin setup, diagnostics, graph

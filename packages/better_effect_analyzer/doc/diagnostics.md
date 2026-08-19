@@ -12,9 +12,11 @@
 | `widget_requests_business_dependency` | IDE/analyze | opt-in lint | Keep Views dependent on ViewModels. |
 | `singleton_viewmodel` | IDE/analyze | opt-in lint | Align ViewModel lifetime with its View or feature. |
 | `missing_service` | graph CLI | error | Validate the complete root Module environment. |
+| `resource_dependency_declared_after_provider` | graph CLI | error | Detect direct or transitive resource dependencies that are acquired later during Module startup. |
 | `dependency_cycle` | graph CLI | error | Detect dependency cycles. |
 | `module_composition_cycle` | graph CLI | error | Detect recursive Module composition. |
 | `module_not_found` | graph CLI | error | Report an explicit `--module` root that does not exist. |
 
 The IDE rules operate on one resolved library at a time. The graph CLI indexes
-the entire package because Module completeness is a cross-library property.
+the entire package because Module completeness and resource startup order are
+cross-library properties.

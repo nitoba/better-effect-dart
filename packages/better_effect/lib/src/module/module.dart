@@ -23,19 +23,27 @@ final class Module extends IterableBase<Binding> {
   @override
   Iterator<Binding> get iterator => _bindings.iterator;
 
-  /// Replace matching bindings while preserving the rest of this module.
+  /// Replace matching bindings without changing their declaration positions.
+  ///
+  /// Override identities that do not exist in this Module are appended in the
+  /// order they are declared. Preserving existing positions keeps resource
+  /// acquisition and reverse release order stable.
   Module overrideWith(Iterable<Binding> overrides) {
     final replacementBindings = List<Binding>.unmodifiable(overrides);
     _validateBindings(replacementBindings);
 
-    final identities = replacementBindings
+    final replacements = <_BindingIdentity, Binding>{
+      for (final binding in replacementBindings) binding._identity: binding,
+    };
+    final existingIdentities = _bindings
         .map((binding) => binding._identity)
         .toSet();
 
     return Module([
       for (final binding in _bindings)
-        if (!identities.contains(binding._identity)) binding,
-      ...replacementBindings,
+        replacements[binding._identity] ?? binding,
+      for (final replacement in replacementBindings)
+        if (!existingIdentities.contains(replacement._identity)) replacement,
     ]);
   }
 
