@@ -9,8 +9,10 @@ final class Scope {
   final Scope? _parent;
   final List<_ScopeFinalizer> _finalizers = <_ScopeFinalizer>[];
   final Set<Scope> _children = <Scope>{};
+  final Set<Future<void>> _physicalOperations = <Future<void>>{};
   bool _closed = false;
   Future<void>? _closingFuture;
+  Exit<Object, Object>? _closingExit;
 
   bool get isClosed => _closed;
 
@@ -32,12 +34,80 @@ final class Scope {
     _finalizers.add(finalizer);
   }
 
+  Future<R> _acquire<R>(
+    FutureOr<R> Function() acquire,
+    FutureOr<void> Function(R resource, Exit<Object, Object> exit) release,
+  ) async {
+    // Registering after await is a race with Scope._close; release directly if
+    // the scope closed before the finalizer could be installed.
+    final resource = await Future<R>.sync(acquire);
+
+    try {
+      _addFinalizer((exit) => release(resource, exit));
+    } catch (error, stackTrace) {
+      try {
+        await Future<void>.sync(
+          () => release(
+            resource,
+            _closingExit ?? const ExitInterrupted<Object, Object>(),
+          ),
+        );
+      } catch (releaseError, releaseStackTrace) {
+        Error.throwWithStackTrace(
+          CompositeDefect(
+            primary: error,
+            primaryStackTrace: stackTrace,
+            secondary: releaseError,
+            secondaryStackTrace: releaseStackTrace,
+          ),
+          stackTrace,
+        );
+      }
+
+      Error.throwWithStackTrace(error, stackTrace);
+    }
+
+    return resource;
+  }
+
+  void _trackPhysical(Future<void> operation) {
+    if (_closed) {
+      throw const ScopeClosedException();
+    }
+
+    final completion = Completer<void>.sync();
+    final tracked = completion.future;
+    _physicalOperations.add(tracked);
+
+    operation.then<void>(
+      (_) {
+        completion.complete();
+      },
+      onError: (Object _, StackTrace _) {
+        completion.complete();
+      },
+    );
+    tracked.then<void>((_) => _physicalOperations.remove(tracked));
+  }
+
+  bool get _hasPendingPhysical => _physicalOperations.isNotEmpty;
+
+  Future<void> _awaitPhysical() async {
+    while (_physicalOperations.isNotEmpty) {
+      await Future.wait<void>(
+        List<Future<void>>.of(_physicalOperations),
+        eagerError: false,
+      );
+    }
+  }
+
   Future<void> _close(Exit<Object, Object> exit) {
     if (_closed) {
       return _closingFuture ?? Future<void>.value();
     }
 
     _closed = true;
+    _closingExit = exit;
     final closing = _closeScope(exit);
     _closingFuture = closing;
     return closing;
@@ -55,6 +125,8 @@ final class Scope {
     }
 
     try {
+      await _awaitPhysical();
+
       for (final finalizer in _finalizers.reversed) {
         try {
           await Future<void>.sync(() => finalizer(exit));

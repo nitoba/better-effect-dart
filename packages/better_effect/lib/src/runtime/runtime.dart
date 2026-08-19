@@ -66,6 +66,7 @@ final class Runtime {
   // ponytail: tracks awaited execution Futures; detached child Futures need
   // explicit cancellation or lease tracking if that ceiling becomes a bug.
   final Set<_ActiveExecution> _activeExecutions = <_ActiveExecution>{};
+  final List<ReleaseFailure> _deferredExecutionFailures = <ReleaseFailure>[];
   RuntimeState _state = RuntimeState.active;
   Future<void>? _closingFuture;
 
@@ -169,7 +170,7 @@ final class Runtime {
   /// Run an Effect while preserving success, failure, and defects in [Exit].
   Future<Exit<A, E>> runExit<A extends Object, E extends Object>(
     Effect<A, E> effect,
-  ) async {
+  ) {
     _ensureActive();
 
     final execution = _ActiveExecution(_rootContext.scope._fork());
@@ -178,21 +179,63 @@ final class Runtime {
       execution.scope,
       cancellation: execution.cancellation,
     );
+    final logicalExit = Completer<Exit<A, E>>.sync();
 
-    Exit<A, E> exit;
+    unawaited(_runExecution(effect, context, execution, logicalExit));
 
+    return logicalExit.future;
+  }
+
+  Future<void> _runExecution<A extends Object, E extends Object>(
+    Effect<A, E> effect,
+    _RuntimeContext context,
+    _ActiveExecution execution,
+    Completer<Exit<A, E>> logicalExit,
+  ) async {
     try {
-      final result = await effect._run(context);
-      exit = result.fold<Exit<A, E>>(
-        (value) => ExitSuccess<A, E>(value),
-        (error) => ExitFailure<A, E>(error),
-      );
+      Exit<A, E> exit;
+
+      try {
+        final result = await effect._run(context);
+        exit = result.fold<Exit<A, E>>(
+          (value) => ExitSuccess<A, E>(value),
+          (error) => ExitFailure<A, E>(error),
+        );
+      } catch (error, stackTrace) {
+        exit = ExitDefect<A, E>(error, stackTrace);
+      }
+
+      if (execution.scope._hasPendingPhysical) {
+        // Deliver the logical result now; Scope._close waits for the physical
+        // operation before releasing execution resources.
+        logicalExit.complete(exit);
+
+        try {
+          await execution.scope._close(exit);
+        } catch (error, stackTrace) {
+          _recordDeferredExecutionFailure(error, stackTrace);
+        }
+      } else {
+        logicalExit.complete(await _closeExecutionScope(execution.scope, exit));
+      }
     } catch (error, stackTrace) {
-      exit = ExitDefect<A, E>(error, stackTrace);
+      if (logicalExit.isCompleted) {
+        _recordDeferredExecutionFailure(error, stackTrace);
+      } else {
+        logicalExit.completeError(error, stackTrace);
+      }
+    } finally {
+      _activeExecutions.remove(execution);
+      execution.complete();
     }
+  }
 
+  Future<Exit<A, E>> _closeExecutionScope<A extends Object, E extends Object>(
+    Scope scope,
+    Exit<A, E> exit,
+  ) async {
     try {
-      await execution.scope._close(exit);
+      await scope._close(exit);
       return exit;
     } catch (releaseError, releaseStackTrace) {
       if (exit is ExitDefect<A, E>) {
@@ -208,10 +251,11 @@ final class Runtime {
       }
 
       return ExitDefect<A, E>(releaseError, releaseStackTrace);
-    } finally {
-      _activeExecutions.remove(execution);
-      execution.complete();
     }
+  }
+
+  void _recordDeferredExecutionFailure(Object error, StackTrace stackTrace) {
+    _deferredExecutionFailures.add((error: error, stackTrace: stackTrace));
   }
 
   /// Close this runtime and release module-owned resources.
@@ -292,6 +336,12 @@ final class Runtime {
       );
     } catch (error, stackTrace) {
       captureError(error, stackTrace);
+    }
+
+    if (_deferredExecutionFailures.isNotEmpty) {
+      final failures = List<ReleaseFailure>.of(_deferredExecutionFailures);
+      _deferredExecutionFailures.clear();
+      captureError(ScopeReleaseException(failures), failures.first.stackTrace);
     }
 
     try {

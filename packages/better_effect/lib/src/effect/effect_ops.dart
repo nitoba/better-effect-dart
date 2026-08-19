@@ -94,12 +94,21 @@ extension EffectTransformOps<A extends Object, E extends Object>
   /// Fail with [onTimeout] when this Effect does not finish in time.
   ///
   /// The underlying Future is not cancelled because Dart Futures do not expose
-  /// general cancellation.
+  /// general cancellation. The Runtime keeps the execution Scope alive until
+  /// the original Future completes.
   Effect<A, E> timeout(Duration duration, {required E Function() onTimeout}) {
     return Effect<A, E>._((context) {
-      return _run(
-        context,
-      ).timeout(duration, onTimeout: () => Failure<A, E>(onTimeout()));
+      final source = _run(context);
+
+      return source.timeout(
+        duration,
+        onTimeout: () {
+          context._trackPhysical(
+            source.then<void>((_) {}, onError: (Object _, StackTrace _) {}),
+          );
+          return Failure<A, E>(onTimeout());
+        },
+      );
     });
   }
 

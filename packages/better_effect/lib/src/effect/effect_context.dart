@@ -111,10 +111,9 @@ final class _EffectContext<E extends Object> implements EffectContext<E> {
     Effect<R, F> acquisition, {
     required FutureOr<void> Function(R resource) release,
   }) async {
-    final resource = await unwrap(acquisition);
-
-    _runtime.scope._addFinalizer((_) => release(resource));
-
-    return resource;
+    return _runtime.scope._acquire(
+      () => unwrap(acquisition),
+      (resource, _) => release(resource),
+    );
   }
 }

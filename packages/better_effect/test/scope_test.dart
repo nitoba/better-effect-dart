@@ -220,6 +220,44 @@ void main() {
     },
   );
 
+  test(
+    'timeout keeps the physical Scope alive until the source Future ends',
+    () async {
+      final acquisitionStarted = Completer<void>();
+      final continueAcquisition = Completer<void>();
+      var released = false;
+
+      final runtime = await Module(const <Binding>[]).start();
+      final running = runtime.runExit(
+        Effect<String, String>.result((use) async {
+          final resource = await use.acquire(
+            Effect<Resource, String>.result((_) async {
+              acquisitionStarted.complete();
+              await continueAcquisition.future;
+              return const Resource('late');
+            }),
+            release: (_) async {
+              released = true;
+            },
+          );
+
+          return resource.name;
+        }).timeout(Duration.zero, onTimeout: () => 'timeout'),
+      );
+
+      await acquisitionStarted.future;
+      final exit = await running.timeout(const Duration(seconds: 1));
+
+      expect(exit, isA<ExitFailure<String, String>>());
+      expect(released, isFalse);
+
+      continueAcquisition.complete();
+      await runtime.close();
+
+      expect(released, isTrue);
+    },
+  );
+
   test('concurrent Runtime.close calls share the active shutdown', () async {
     final started = Completer<void>();
     final continueExecution = Completer<void>();

@@ -48,6 +48,10 @@ final class _RuntimeContext {
     return local.initial;
   }
 
+  void _trackPhysical(Future<void> operation) {
+    scope._trackPhysical(operation);
+  }
+
   _RuntimeContext _withScope(
     Scope childScope, {
     required CancellationSignal cancellation,

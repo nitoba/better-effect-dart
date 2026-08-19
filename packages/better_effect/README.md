@@ -426,7 +426,9 @@ underlying Futures before returning; Dart Futures do not provide general
 fiber-style cancellation.
 
 The `timeout` operator has the same Dart Future limitation: it returns the
-timeout result, but it cannot cancel work already running underneath.
+timeout result, but it cannot cancel work already running underneath. The
+Runtime keeps that execution Scope alive until the underlying Future finishes,
+so a late `use.acquire` can still register and release its resource safely.
 
 ### Interoperate with `result_dart`
 
