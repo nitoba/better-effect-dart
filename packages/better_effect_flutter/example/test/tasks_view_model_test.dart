@@ -7,37 +7,31 @@ import 'package:flutter_test/flutter_test.dart';
 
 final class FakeTaskRepository implements TaskRepository {
   final List<Task> tasks = <Task>[
-    const Task(
-      id: TaskId(1),
-      title: 'First',
-      completed: false,
-    ),
+    const Task(id: TaskId(1), title: 'First', completed: false),
   ];
 
   @override
   AppEffect<Task> add(String title) => .sync(() {
-        final task = Task(
-          id: TaskId(tasks.length + 1),
-          title: title,
-          completed: false,
-        );
-        tasks.add(task);
-        return task;
-      });
+    final task = Task(
+      id: TaskId(tasks.length + 1),
+      title: title,
+      completed: false,
+    );
+    tasks.add(task);
+    return task;
+  });
 
   @override
-  AppEffect<List<Task>> all() => .succeed(
-        List<Task>.unmodifiable(tasks),
-      );
+  AppEffect<List<Task>> all() => .succeed(List<Task>.unmodifiable(tasks));
 
   @override
   AppEffect<Task> toggle(TaskId id) => .sync(() {
-        final index = tasks.indexWhere((task) => task.id == id);
-        final current = tasks[index];
-        final updated = current.copyWith(completed: !current.completed);
-        tasks[index] = updated;
-        return updated;
-      });
+    final index = tasks.indexWhere((task) => task.id == id);
+    final current = tasks[index];
+    final updated = current.copyWith(completed: !current.completed);
+    tasks[index] = updated;
+    return updated;
+  });
 }
 
 void main() {

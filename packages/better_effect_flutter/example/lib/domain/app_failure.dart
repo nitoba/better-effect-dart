@@ -31,10 +31,7 @@ final class TaskNotFound extends AppFailure {
 }
 
 final class TaskStorageFailure extends AppFailure {
-  const TaskStorageFailure({
-    required this.cause,
-    required this.stackTrace,
-  });
+  const TaskStorageFailure({required this.cause, required this.stackTrace});
 
   final Exception cause;
   final StackTrace stackTrace;

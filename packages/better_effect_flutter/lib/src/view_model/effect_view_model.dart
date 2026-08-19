@@ -35,11 +35,8 @@ abstract class EffectViewModel extends ChangeNotifier with EffectCommandOwner {
 
   /// Create and own a command with one typed input.
   @protected
-  EffectCommand<I, A, E> commandWithInput<
-    I,
-    A extends Object,
-    E extends Object
-  >(
+  EffectCommand<I, A, E>
+  commandWithInput<I, A extends Object, E extends Object>(
     Effect<A, E> Function(I input) action, {
     EffectCommandConcurrency concurrency = EffectCommandConcurrency.drop,
     bool keepPreviousData = true,

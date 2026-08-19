@@ -32,17 +32,15 @@ void main() {
         home: EffectCommandBuilder<int, UiFailure>(
           command: command,
           builder: (context, state, _) {
-            return Text(
-              switch (state) {
-                EffectCommandIdle<int, UiFailure>() => 'idle',
-                EffectCommandRunning<int, UiFailure>() => 'running',
-                EffectCommandSuccess<int, UiFailure>(:final value) =>
-                  'success:$value',
-                EffectCommandFailure<int, UiFailure>() => 'failure',
-                EffectCommandDefect<int, UiFailure>() => 'defect',
-                EffectCommandInterrupted<int, UiFailure>() => 'interrupted',
-              },
-            );
+            return Text(switch (state) {
+              EffectCommandIdle<int, UiFailure>() => 'idle',
+              EffectCommandRunning<int, UiFailure>() => 'running',
+              EffectCommandSuccess<int, UiFailure>(:final value) =>
+                'success:$value',
+              EffectCommandFailure<int, UiFailure>() => 'failure',
+              EffectCommandDefect<int, UiFailure>() => 'defect',
+              EffectCommandInterrupted<int, UiFailure>() => 'interrupted',
+            });
           },
         ),
       ),
@@ -92,8 +90,9 @@ void main() {
     expect(successCalls, 1);
   });
 
-  testWidgets('failure listener receives typed error and previous data',
-      (tester) async {
+  testWidgets('failure listener receives typed error and previous data', (
+    tester,
+  ) async {
     const failure = UiFailure('nope');
     UiFailure? received;
     int? previous;
@@ -130,8 +129,9 @@ void main() {
     expect(previous, 8);
   });
 
-  testWidgets('provider exposes commands without a global injector',
-      (tester) async {
+  testWidgets('provider exposes commands without a global injector', (
+    tester,
+  ) async {
     EffectCommands? scopedCommands;
 
     await tester.pumpWidget(

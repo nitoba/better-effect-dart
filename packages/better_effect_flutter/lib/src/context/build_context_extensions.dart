@@ -30,20 +30,14 @@ extension BetterEffectBuildContext on BuildContext {
   }
 
   /// Execute an Effect and return its typed Result.
-  Future<ResultDart<A, E>> runEffect<
-    A extends Object,
-    E extends Object
-  >(
+  Future<ResultDart<A, E>> runEffect<A extends Object, E extends Object>(
     Effect<A, E> effect,
   ) {
     return BetterEffectScope.of(this, listen: false).runtime.run(effect);
   }
 
   /// Execute an Effect while preserving expected failures and defects in Exit.
-  Future<Exit<A, E>> runEffectExit<
-    A extends Object,
-    E extends Object
-  >(
+  Future<Exit<A, E>> runEffectExit<A extends Object, E extends Object>(
     Effect<A, E> effect,
   ) {
     return BetterEffectScope.of(this, listen: false).runtime.runExit(effect);
