@@ -168,5 +168,7 @@ final class _EffectCommandListenerState<A extends Object, E extends Object>
           widget.onInterrupted?.call(context, previous);
       }
     });
+
+    WidgetsBinding.instance.ensureVisualUpdate();
   }
 }
