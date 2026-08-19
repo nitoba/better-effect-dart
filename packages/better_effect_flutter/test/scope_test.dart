@@ -49,7 +49,7 @@ void main() {
     final module = Module([
       .resource<_BootstrapResource>(
         acquire: (_) => startGate.future,
-        release: (_) {},
+        release: (_, _) {},
       ),
     ]);
 

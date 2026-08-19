@@ -1,0 +1,89 @@
+name: CI better_effect_flutter
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - packages/better_effect/**
+      - packages/better_effect_analyzer/**
+      - packages/better_effect_flutter/**
+      - .github/workflows/ci-better-effect-flutter.yml
+  pull_request:
+    paths:
+      - packages/better_effect/**
+      - packages/better_effect_analyzer/**
+      - packages/better_effect_flutter/**
+      - .github/workflows/ci-better-effect-flutter.yml
+
+concurrency:
+  group: better-effect-flutter-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  flutter:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Use the repository core package
+        working-directory: packages/better_effect_flutter
+        run: |
+          cat > pubspec_overrides.yaml <<'YAML'
+          dependency_overrides:
+            better_effect:
+              path: ../better_effect
+          YAML
+
+      - name: Install package dependencies
+        working-directory: packages/better_effect_flutter
+        run: flutter pub get
+
+      - name: Check package formatting
+        working-directory: packages/better_effect_flutter
+        run: dart format --output=none --set-exit-if-changed .
+
+      - name: Analyze package
+        working-directory: packages/better_effect_flutter
+        run: flutter analyze --fatal-infos
+
+      - name: Test package
+        working-directory: packages/better_effect_flutter
+        run: flutter test
+
+      - name: Use repository packages in the example
+        working-directory: packages/better_effect_flutter/example
+        run: |
+          cat > pubspec_overrides.yaml <<'YAML'
+          dependency_overrides:
+            better_effect:
+              path: ../../better_effect
+            better_effect_analyzer:
+              path: ../../better_effect_analyzer
+            better_effect_flutter:
+              path: ..
+          YAML
+
+      - name: Install example dependencies
+        working-directory: packages/better_effect_flutter/example
+        run: flutter pub get
+
+      - name: Check example formatting
+        working-directory: packages/better_effect_flutter/example
+        run: dart format --output=none --set-exit-if-changed .
+
+      - name: Analyze example
+        working-directory: packages/better_effect_flutter/example
+        run: flutter analyze --fatal-infos
+
+      - name: Test example
+        working-directory: packages/better_effect_flutter/example
+        run: flutter test
