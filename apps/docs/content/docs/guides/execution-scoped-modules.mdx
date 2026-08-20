@@ -1,0 +1,234 @@
+---
+title: Modules por execução
+description: Forneça contexto, overrides e recursos temporários sem alterar o Runtime raiz
+---
+
+Um Runtime de longa duração normalmente contém capacidades compartilhadas:
+configuração, database, clients, storage e repositories. Algumas operações
+precisam de um ambiente adicional que pertence somente àquela execução:
+
+- contexto de uma requisição HTTP;
+- usuário ou tenant autenticado;
+- transaction;
+- metadata de um job;
+- override temporário em preview ou teste;
+- recurso de uma feature que não deve viver durante toda a aplicação.
+
+Use `runWith`, `runExitWith` ou `executeWith` para instalar um `Module`
+temporário sem registrar nada no Runtime raiz.
+
+## Um contexto por requisição
+
+```dart
+final requestModule = Module([
+  .instance<RequestContext>(requestContext),
+  .resource<Transaction>(
+    acquire: (services) {
+      final database = services<Database>();
+      return database.beginTransaction();
+    },
+    release: (transaction, exit) {
+      return transaction.close(exit);
+    },
+  ),
+]);
+
+final exit = await runtime.runExitWith(
+  requestModule,
+  handleRequest,
+  executionLabel: 'http.request',
+);
+```
+
+O `Database` vem do Runtime raiz. `RequestContext` e `Transaction` existem
+somente durante essa execução.
+
+Para receber um `ResultDart`, use `runWith`:
+
+```dart
+final result = await runtime.runWith(
+  requestModule,
+  handleRequest,
+);
+```
+
+Para controlar interrupção e conclusão física, use `executeWith`:
+
+```dart
+final execution = runtime.executeWith(
+  requestModule,
+  handleRequest,
+  label: 'http.request',
+);
+
+execution.interrupt(reason: 'client-disconnected');
+final exit = await execution.exit;
+```
+
+## Como a resolução funciona
+
+O ambiente é local-first:
+
+```text
+Module da execução
+      │
+      ├── encontrou o serviço localmente → usa o valor local
+      │
+      └── não encontrou → consulta o Runtime raiz
+```
+
+Isso permite combinar dependências dos dois níveis:
+
+```dart
+final requestModule = Module([
+  .instance<RequestContext>(requestContext),
+  .provide<RequestRepository>(RequestRepository.new),
+]);
+
+final class RequestRepository {
+  RequestRepository(this.database, this.context);
+
+  final Database database;       // Runtime raiz
+  final RequestContext context;  // Module da execução
+}
+```
+
+O Runtime raiz não enxerga `RequestContext` depois que a execução termina.
+Também não é alterado quando o Module local substitui um serviço.
+
+## Override temporário
+
+Um binding local com a mesma identidade substitui o valor raiz somente dentro
+da execução:
+
+```dart
+const endpoint = ServiceKey<ApiEndpoint>('endpoint');
+
+final previewModule = Module([
+  .instance<ApiEndpoint>(previewEndpoint, key: endpoint),
+]);
+
+final preview = await runtime.runWith(
+  previewModule,
+  renderPreview,
+);
+```
+
+Fora desse `runWith`, `use(endpoint)` continua retornando o endpoint configurado
+no Runtime raiz.
+
+Use esse padrão para previews, testes de integração, feature flags por operação
+e ambientes multi-tenant. Evite usá-lo como substituto de uma modelagem clara de
+serviços: overrides devem ser deliberados e próximos do boundary que os possui.
+
+## Recursos temporários
+
+Resources declarados no Module local pertencem à execução:
+
+```dart
+final transactionModule = Module([
+  .resource<Transaction>(
+    acquire: (services) {
+      return services<Database>().beginTransaction();
+    },
+    release: (transaction, exit) async {
+      switch (exit) {
+        case ExitSuccess():
+          await transaction.commit();
+        case _:
+          await transaction.rollback();
+      }
+    },
+  ),
+]);
+```
+
+A ordem de cleanup é:
+
+```text
+recursos adquiridos com use.acquire
+    ↓
+resources do Module da execução, em ordem inversa
+    ↓
+serviços locais gerenciados pelo resolver
+    ↓
+resources do Runtime raiz, somente no shutdown da aplicação
+```
+
+Se o startup local falhar no meio, os resources já adquiridos são fechados antes
+do defeito ser entregue.
+
+## Timeout e interrupção não quebram ownership
+
+Um timeout pode entregar uma falha lógica antes de o Future subjacente terminar.
+Da mesma forma, `execution.interrupt()` publica `ExitInterrupted` sem prometer
+cancelamento preemptivo de qualquer Future Dart.
+
+O Runtime continua sendo owner do Module local até a conclusão física e o
+cleanup. Portanto, uma transaction, subscription ou arquivo temporário não é
+fechado enquanto o código ainda pode estar usando o recurso.
+
+Quando a API suportar cancelamento, conecte `use.cancellation`:
+
+```dart
+Effect<Response, RequestFailure> sendRequest() =>
+    Effect.result((use) async {
+      final client = use<HttpClient>();
+
+      return client.send(
+        cancellation: use.cancellation.whenCancelled,
+      );
+    });
+```
+
+## Execuções concorrentes são isoladas
+
+O mesmo `Module` pode ser reutilizado:
+
+```dart
+final first = runtime.executeWith(requestModule, firstRequest);
+final second = runtime.executeWith(requestModule, secondRequest);
+```
+
+Cada execução recebe seus próprios resources e instâncias locais. O `Module` é
+uma descrição imutável, não um container compartilhado.
+
+## Quando usar e quando evitar
+
+<Accordions>
+  <Accordion title="Use para contexto de request, job ou sessão">
+    O valor nasce no boundary, precisa estar disponível em várias camadas e não
+    deve entrar em singletons globais. Um Module por execução expressa esse
+    ownership diretamente.
+  </Accordion>
+  <Accordion title="Use para transaction ou recurso temporário composto">
+    Quando a aquisição depende de serviços do Runtime e o recurso deve ser
+    liberado junto da operação, declare-o no Module local.
+  </Accordion>
+  <Accordion title="Use use.acquire para um recurso interno de uma única função">
+    Se somente um Effect usa o recurso e não há outros providers locais, o
+    mecanismo mais simples é `use.acquire`.
+  </Accordion>
+  <Accordion title="Não crie um Module local para cada valor simples">
+    Parâmetros que pertencem naturalmente à assinatura do caso de uso devem
+    continuar sendo parâmetros. Use o ambiente para contexto transversal e
+    capacidades com lifecycle.
+  </Accordion>
+</Accordions>
+
+## Analyzer
+
+O graph checker reconhece Modules visíveis passados a `runWith`, `runExitWith` e
+`executeWith`. Dependências ausentes localmente podem vir do Runtime raiz, mas o
+analyzer continua verificando problemas dentro do overlay, como ciclos,
+providers incompatíveis e resources locais declarados na ordem errada.
+
+Mantenha o Module próximo do boundary e estaticamente visível quando quiser o
+melhor feedback do analyzer.
+
+## Próximos passos
+
+- [Recursos e ciclo de vida](./resources-and-lifetimes)
+- [Observabilidade](./observability)
+- [Testando Effects e Commands](./testing)
+- [Diagnósticos e CI](./diagnostics)

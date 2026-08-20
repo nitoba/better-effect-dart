@@ -1,4 +1,13 @@
 {
   "title": "Guias",
-  "pages": ["index", "effects", "resources-and-lifetimes", "flutter-mvvm", "testing", "diagnostics"]
+  "pages": [
+    "index",
+    "effects",
+    "resources-and-lifetimes",
+    "execution-scoped-modules",
+    "observability",
+    "flutter-mvvm",
+    "testing",
+    "diagnostics"
+  ]
 }

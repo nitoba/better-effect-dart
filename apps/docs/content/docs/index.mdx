@@ -58,6 +58,12 @@ Clients, conexões e subscriptions têm dono. `Runtime` mantém recursos da
 aplicação; `Scope` fecha recursos de uma execução; Flutter fecha o Runtime no
 desmonte do subtree. Essa regra evita tanto vazamentos quanto `close()` duplicado.
 
+### Operações precisam ser explicáveis em produção
+
+Labels, metadata por execução e `RuntimeObserver` conectam o mesmo modelo de
+ownership a logs, métricas e tracing. Observabilidade acompanha a execução, mas
+não cria um novo canal de falha nem altera o resultado do Effect.
+
 ### Feedback deve chegar antes do CI
 
 O analyzer oferece feedback no editor para erros locais e um checker de grafo
@@ -68,7 +74,7 @@ isso existem verificações diferentes.
 O projeto é dividido em três camadas:
 
 <Cards>
-  <Card title="better_effect" href="/docs/packages/better_effect" description="Runtime Dart com Effect, Module, escopos e recursos." />
+  <Card title="better_effect" href="/docs/packages/better_effect" description="Runtime Dart com Effect, Module, escopos, recursos e observabilidade." />
   <Card title="better_effect_flutter" href="/docs/packages/better_effect_flutter" description="Integração Flutter para Commands, ViewModels e UI reativa." />
   <Card title="better_effect_analyzer" href="/docs/packages/better_effect_analyzer" description="Plugin e CLI para encontrar problemas no código e no grafo de Modules." />
 </Cards>
@@ -78,11 +84,17 @@ O projeto é dividido em três camadas:
 1. Leia [por que estes packages existem](/docs/getting-started/why-better-effect)
    e depois o [modelo mental](/docs/getting-started/mental-model).
 2. Siga a [primeira feature](/docs/getting-started/first-feature), instale o
-   [`better_effect`](/docs/packages/better_effect) e defina seu
-   primeiro `Effect`.
-3. Em Flutter, siga o guia de
+   [`better_effect`](/docs/packages/better_effect) e defina seu primeiro
+   `Effect`.
+3. Defina ownership com o guia de
+   [recursos e ciclo de vida](/docs/guides/resources-and-lifetimes).
+4. Para request context, transactions ou overrides temporários, use
+   [Modules por execução](/docs/guides/execution-scoped-modules).
+5. Conecte logs, métricas e tracing pelo guia de
+   [observabilidade](/docs/guides/observability).
+6. Em Flutter, siga o guia de
    [`better_effect_flutter`](/docs/packages/better_effect_flutter).
-4. Ative os diagnósticos do
+7. Ative os diagnósticos do
    [`better_effect_analyzer`](/docs/packages/better_effect_analyzer).
 
 Os packages são publicados de forma independente no pub.dev. Consulte o
