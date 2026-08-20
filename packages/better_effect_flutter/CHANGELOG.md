@@ -19,6 +19,9 @@
   stale startup attempts safely.
 - Existing `closeRuntimeOnDispose` and `closeRuntimeOnDetach` constructor
   arguments remain as deprecated migration parameters.
+- Added deterministic regression coverage for queue cancellation, retained
+  physical ownership, Command disposal versus Runtime shutdown, repeated
+  cancellation races, and stale `latest` completions.
 
 ## 0.1.1
 
