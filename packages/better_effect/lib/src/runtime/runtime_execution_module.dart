@@ -59,6 +59,7 @@ Effect<A, E> _withExecutionModule<A extends Object, E extends Object>(
       cancellation: rootContext.cancellation,
       overrides: rootContext.overrides,
       locals: rootContext.locals,
+      observation: rootContext.observation,
     );
 
     await _installExecutionModule(module, overlayContext);
@@ -68,7 +69,7 @@ Effect<A, E> _withExecutionModule<A extends Object, E extends Object>(
     rootContext.cancellation.throwIfCancelled();
 
     return effect._run(overlayContext);
-  });
+  }, effect._localBindings);
 }
 
 ResolverBackend _createExecutionOverlay(ResolverBackend root) {

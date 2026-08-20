@@ -22,6 +22,7 @@ final class _RuntimeContext {
     required this.cancellation,
     required this.overrides,
     required this.locals,
+    required this.observation,
   });
 
   final ResolverBackend backend;
@@ -29,15 +30,66 @@ final class _RuntimeContext {
   final CancellationSignal cancellation;
   final Map<_ServiceIdentity, Object> overrides;
   final Map<Object, Object> locals;
+  final _ExecutionObservation? observation;
 
   T _resolve<T extends Object>([ServiceKey<T>? key]) {
     final identity = _ServiceIdentity(T, key?._backendKey);
+    final observers = observation;
 
-    if (overrides.containsKey(identity)) {
-      return overrides[identity]! as T;
+    if (observers == null) {
+      if (overrides.containsKey(identity)) {
+        return overrides[identity]! as T;
+      }
+
+      return backend.resolve<T>(key: key?._backendKey);
     }
 
-    return backend.resolve<T>(key: key?._backendKey);
+    final startedAt = DateTime.now();
+    final source = overrides.containsKey(identity)
+        ? ServiceResolutionSource.localOverride
+        : ServiceResolutionSource.backend;
+
+    try {
+      final value = source == ServiceResolutionSource.localOverride
+          ? overrides[identity]! as T
+          : backend.resolve<T>(key: key?._backendKey);
+      final completedAt = DateTime.now();
+
+      observers.observers.serviceResolve(
+        ServiceResolveEvent(
+          context: observers.context(scope, locals),
+          serviceType: T,
+          serviceKey: key?.name,
+          source: source,
+          resolutionPath: <String>[_serviceRequestDisplay(T, key?.name)],
+          startedAt: startedAt,
+          completedAt: completedAt,
+          duration: completedAt.difference(startedAt),
+          error: null,
+          stackTrace: null,
+        ),
+      );
+
+      return value;
+    } catch (error, stackTrace) {
+      final completedAt = DateTime.now();
+      observers.observers.serviceResolve(
+        ServiceResolveEvent(
+          context: observers.context(scope, locals),
+          serviceType: T,
+          serviceKey: key?.name,
+          source: source,
+          resolutionPath: _serviceResolutionPath(T, key?.name, error),
+          startedAt: startedAt,
+          completedAt: completedAt,
+          duration: completedAt.difference(startedAt),
+          error: error,
+          stackTrace: stackTrace,
+        ),
+      );
+
+      Error.throwWithStackTrace(error, stackTrace);
+    }
   }
 
   T _local<T extends Object>(EffectLocal<T> local) {
@@ -48,6 +100,118 @@ final class _RuntimeContext {
     return local.initial;
   }
 
+  Future<R> _acquireResource<R extends Object>({
+    required FutureOr<R> Function() operation,
+    required ResourceRelease<R> release,
+    required Type serviceType,
+    required String? serviceKey,
+    required ResourceAcquisitionSource source,
+  }) {
+    final observers = observation;
+    if (observers == null) {
+      return scope._acquire(operation, release);
+    }
+
+    return _acquireObservedResource<R>(
+      operation: operation,
+      release: release,
+      serviceType: serviceType,
+      serviceKey: serviceKey,
+      source: source,
+      observers: observers,
+    );
+  }
+
+  Future<R> _acquireObservedResource<R extends Object>({
+    required FutureOr<R> Function() operation,
+    required ResourceRelease<R> release,
+    required Type serviceType,
+    required String? serviceKey,
+    required ResourceAcquisitionSource source,
+    required _ExecutionObservation observers,
+  }) async {
+    final startedAt = DateTime.now();
+
+    try {
+      final resource = await scope._acquire(operation, (
+        resource,
+        outcome,
+      ) async {
+        final releaseStartedAt = DateTime.now();
+
+        try {
+          await Future<void>.sync(() => release(resource, outcome));
+          final completedAt = DateTime.now();
+          observers.observers.resourceRelease(
+            ResourceReleaseEvent(
+              context: observers.context(scope, locals),
+              serviceType: serviceType,
+              serviceKey: serviceKey,
+              source: source,
+              outcome: outcome,
+              startedAt: releaseStartedAt,
+              completedAt: completedAt,
+              duration: completedAt.difference(releaseStartedAt),
+              error: null,
+              stackTrace: null,
+            ),
+          );
+        } catch (error, stackTrace) {
+          final completedAt = DateTime.now();
+          observers.observers.resourceRelease(
+            ResourceReleaseEvent(
+              context: observers.context(scope, locals),
+              serviceType: serviceType,
+              serviceKey: serviceKey,
+              source: source,
+              outcome: outcome,
+              startedAt: releaseStartedAt,
+              completedAt: completedAt,
+              duration: completedAt.difference(releaseStartedAt),
+              error: error,
+              stackTrace: stackTrace,
+            ),
+          );
+          Error.throwWithStackTrace(error, stackTrace);
+        }
+      });
+      final completedAt = DateTime.now();
+
+      observers.observers.serviceAcquire(
+        ServiceAcquireEvent(
+          context: observers.context(scope, locals),
+          serviceType: serviceType,
+          serviceKey: serviceKey,
+          source: source,
+          startedAt: startedAt,
+          completedAt: completedAt,
+          duration: completedAt.difference(startedAt),
+          error: null,
+          stackTrace: null,
+        ),
+      );
+
+      return resource;
+    } catch (error, stackTrace) {
+      final completedAt = DateTime.now();
+      observers.observers.serviceAcquire(
+        ServiceAcquireEvent(
+          context: observers.context(scope, locals),
+          serviceType: serviceType,
+          serviceKey: serviceKey,
+          source: source,
+          startedAt: startedAt,
+          completedAt: completedAt,
+          duration: completedAt.difference(startedAt),
+          error: error,
+          stackTrace: stackTrace,
+        ),
+      );
+
+      Error.throwWithStackTrace(error, stackTrace);
+    }
+  }
+
   void _trackPhysical(Future<void> operation) {
     scope._trackPhysical(operation);
   }
@@ -55,6 +219,7 @@ final class _RuntimeContext {
   _RuntimeContext _withScope(
     Scope childScope, {
     required CancellationSignal cancellation,
+    required _ExecutionObservation? observation,
   }) {
     return _RuntimeContext(
       backend: backend,
@@ -62,6 +227,7 @@ final class _RuntimeContext {
       cancellation: cancellation,
       overrides: overrides,
       locals: locals,
+      observation: observation,
     );
   }
 
@@ -77,16 +243,50 @@ final class _RuntimeContext {
       cancellation: cancellation,
       overrides: <_ServiceIdentity, Object>{...overrides, identity: instance},
       locals: locals,
+      observation: observation,
     );
   }
 
-  _RuntimeContext _withLocal<T extends Object>(EffectLocal<T> local, T value) {
+  _RuntimeContext _withLocals(Iterable<EffectLocalBinding> bindings) {
+    final updated = <Object, Object>{...locals};
+    for (final binding in bindings) {
+      binding._writeLocal(updated);
+    }
+
     return _RuntimeContext(
       backend: backend,
       scope: scope,
       cancellation: cancellation,
       overrides: overrides,
-      locals: <Object, Object>{...locals, local: value},
+      locals: updated,
+      observation: observation,
     );
   }
+}
+
+String _serviceRequestDisplay(Type serviceType, String? key) {
+  return key == null ? '$serviceType' : '$serviceType[$key]';
+}
+
+List<String> _serviceResolutionPath(
+  Type serviceType,
+  String? key,
+  Object error,
+) {
+  final requested = _serviceRequestDisplay(serviceType, key);
+  final backendPath = switch (error) {
+    UnregisteredInstance(:final classNames) => classNames,
+    UnregisteredInstanceByKey(:final keys) => keys,
+    _ => const <String>[],
+  };
+
+  if (backendPath.isEmpty) {
+    return <String>[requested];
+  }
+
+  if (backendPath.first == requested) {
+    return List<String>.of(backendPath);
+  }
+
+  return <String>[requested, ...backendPath];
 }

@@ -91,6 +91,7 @@ abstract interface class _RuntimeExecution {
   String? get label;
   Scope get scope;
   CancellationSignal get cancellation;
+  _ExecutionObservation? get observation;
   Future<void> get completed;
   bool get isCompleted;
   void requestInterruption(Object? reason);
@@ -102,6 +103,7 @@ final class _EffectExecutionImpl<A extends Object, E extends Object>
     required this.id,
     required this.scope,
     required this.label,
+    required this.observation,
   }) : cancellation = CancellationSignal._();
 
   @override
@@ -115,6 +117,9 @@ final class _EffectExecutionImpl<A extends Object, E extends Object>
 
   @override
   final CancellationSignal cancellation;
+
+  @override
+  final _ExecutionObservation? observation;
 
   final Completer<Exit<A, E>> _exit = Completer<Exit<A, E>>.sync();
   final Completer<void> _completed = Completer<void>.sync();
@@ -145,13 +150,47 @@ final class _EffectExecutionImpl<A extends Object, E extends Object>
       return false;
     }
 
+    _emitInterruption(
+      reason: reason,
+      source: InterruptionSource.executionOwner,
+      publishesLogicalInterruption: true,
+    );
     completeLogical(ExitInterrupted<A, E>());
     return true;
   }
 
   @override
   void requestInterruption(Object? reason) {
-    cancellation._cancel(reason);
+    if (!cancellation._cancel(reason)) {
+      return;
+    }
+
+    _emitInterruption(
+      reason: reason,
+      source: InterruptionSource.runtimeShutdown,
+      publishesLogicalInterruption: false,
+    );
+  }
+
+  void _emitInterruption({
+    required Object? reason,
+    required InterruptionSource source,
+    required bool publishesLogicalInterruption,
+  }) {
+    final current = observation;
+    if (current == null) {
+      return;
+    }
+
+    current.observers.interruption(
+      InterruptionEvent(
+        context: current.context(scope, const <Object, Object>{}),
+        timestamp: DateTime.now(),
+        reason: reason,
+        source: source,
+        publishesLogicalInterruption: publishesLogicalInterruption,
+      ),
+    );
   }
 
   void completeLogical(Exit<A, E> value) {
@@ -163,14 +202,6 @@ final class _EffectExecutionImpl<A extends Object, E extends Object>
     _exit.complete(value);
   }
 
-  void completeLogicalError(Object error, StackTrace stackTrace) {
-    if (_exit.isCompleted) {
-      return;
-    }
-
-    _exit.completeError(error, stackTrace);
-  }
-
   void completePhysical() {
     if (!_completed.isCompleted) {
       _completed.complete();
@@ -180,10 +211,11 @@ final class _EffectExecutionImpl<A extends Object, E extends Object>
 
 /// Executes Effects against the environment built from a [Module].
 final class Runtime {
-  Runtime._(this._rootContext, this._cleanupFailureObserver);
+  Runtime._(this._rootContext, this._cleanupFailureObserver, this._observers);
 
   final _RuntimeContext _rootContext;
   final CleanupFailureObserver? _cleanupFailureObserver;
+  final _RuntimeObservers? _observers;
   final Set<_RuntimeExecution> _activeExecutions = <_RuntimeExecution>{};
   final List<ReleaseFailure> _deferredExecutionFailures = <ReleaseFailure>[];
   int _nextExecutionId = 0;
@@ -195,15 +227,32 @@ final class Runtime {
     Module module, {
     ResolverBackend? backend,
     CleanupFailureObserver? cleanupFailureObserver,
+    Iterable<RuntimeObserver> observers = const <RuntimeObserver>[],
+    RuntimeObserverErrorHandler? observerErrorHandler,
   }) async {
+    final observerHub = _RuntimeObservers.create(
+      observers,
+      observerErrorHandler,
+    );
     final resolver = backend ?? AutoInjectorBackend();
     final rootScope = Scope._();
+    final rootObservation = observerHub == null
+        ? null
+        : _ExecutionObservation(
+            observers: observerHub,
+            executionId: 0,
+            executionLabel: null,
+            parentExecutionId: null,
+            startedAt: DateTime.now(),
+            initialMetadata: const <String, Object>{},
+          );
     final context = _RuntimeContext(
       backend: resolver,
       scope: rootScope,
       cancellation: CancellationSignal._(),
       overrides: const <_ServiceIdentity, Object>{},
       locals: const <Object, Object>{},
+      observation: rootObservation,
     );
 
     try {
@@ -223,7 +272,7 @@ final class Runtime {
 
       await Future<void>.sync(resolver.activate);
 
-      return Runtime._(context, cleanupFailureObserver);
+      return Runtime._(context, cleanupFailureObserver, observerHub);
     } catch (error, stackTrace) {
       final outcome = ExitDefect<Object, Object>(error, stackTrace);
       Object? cleanupError;
@@ -232,13 +281,15 @@ final class Runtime {
       try {
         await rootScope._close(outcome);
       } catch (releaseError, releaseStack) {
+        final diagnostic = CleanupFailureDiagnostic(
+          outcome: outcome,
+          error: _asScopeReleaseException(releaseError, releaseStack),
+          executionId: 0,
+        );
+        _emitCleanupFailure(rootObservation, rootScope, diagnostic);
         await _notifyCleanupFailureBestEffort(
           cleanupFailureObserver,
-          CleanupFailureDiagnostic(
-            outcome: outcome,
-            error: _asScopeReleaseException(releaseError, releaseStack),
-            executionId: 0,
-          ),
+          diagnostic,
         );
         cleanupError = releaseError;
         cleanupStackTrace = releaseStack;
@@ -296,16 +347,39 @@ final class Runtime {
   }) {
     _ensureActive();
 
+    final id = ++_nextExecutionId;
+    final scope = _rootContext.scope._fork();
+    final observation = _observers == null
+        ? null
+        : _ExecutionObservation(
+            observers: _observers,
+            executionId: id,
+            executionLabel: label,
+            parentExecutionId: null,
+            startedAt: DateTime.now(),
+            initialMetadata: effect._initialObserverMetadata(),
+          );
     final execution = _EffectExecutionImpl<A, E>(
-      id: ++_nextExecutionId,
-      scope: _rootContext.scope._fork(),
+      id: id,
+      scope: scope,
       label: label,
+      observation: observation,
     );
     _activeExecutions.add(execution);
     final context = _rootContext._withScope(
       execution.scope,
       cancellation: execution.cancellation,
+      observation: observation,
     );
+
+    if (observation != null) {
+      observation.observers.executionStart(
+        ExecutionStartEvent(
+          context: observation.context(scope, context.locals),
+          startedAt: observation.startedAt,
+        ),
+      );
+    }
 
     unawaited(_runExecution(effect, context, execution));
 
@@ -334,6 +408,8 @@ final class Runtime {
     _RuntimeContext context,
     _EffectExecutionImpl<A, E> execution,
   ) async {
+    Exit<A, E>? physicalOutcome;
+
     try {
       Exit<A, E> computedExit;
 
@@ -351,6 +427,7 @@ final class Runtime {
 
       final wasPublished = execution.hasPublishedExit;
       final outcome = execution.publishedExit ?? computedExit;
+      physicalOutcome = outcome;
 
       if (wasPublished && computedExit is ExitDefect<A, E>) {
         _recordDeferredExecutionFailure(
@@ -362,6 +439,7 @@ final class Runtime {
       if (execution.scope._hasPendingPhysical || wasPublished) {
         if (!wasPublished) {
           execution.completeLogical(computedExit);
+          physicalOutcome = computedExit;
         }
 
         try {
@@ -381,15 +459,41 @@ final class Runtime {
           execution,
         );
         execution.completeLogical(closedExit);
+        physicalOutcome = closedExit;
       }
     } catch (error, stackTrace) {
       if (execution.hasPublishedExit) {
         _recordDeferredExecutionFailure(error, stackTrace);
+        physicalOutcome = execution.publishedExit;
       } else {
-        execution.completeLogicalError(error, stackTrace);
+        final defect = ExitDefect<A, E>(error, stackTrace);
+        execution.completeLogical(defect);
+        physicalOutcome = defect;
       }
     } finally {
       _activeExecutions.remove(execution);
+
+      final outcome =
+          execution.publishedExit ??
+          physicalOutcome ??
+          ExitDefect<A, E>(
+            StateError('Execution completed without a logical outcome.'),
+            StackTrace.current,
+          );
+      final observation = execution.observation;
+      if (observation != null) {
+        final completedAt = DateTime.now();
+        observation.observers.executionEnd(
+          ExecutionEndEvent(
+            context: observation.context(execution.scope, context.locals),
+            startedAt: observation.startedAt,
+            completedAt: completedAt,
+            duration: completedAt.difference(observation.startedAt),
+            outcome: outcome,
+          ),
+        );
+      }
+
       execution.completePhysical();
     }
   }
@@ -434,15 +538,14 @@ final class Runtime {
     Exit<Object, Object> outcome, {
     required _RuntimeExecution execution,
   }) {
-    return _notifyCleanupFailureBestEffort(
-      _cleanupFailureObserver,
-      CleanupFailureDiagnostic(
-        outcome: outcome,
-        error: error,
-        executionId: execution.id,
-        executionLabel: execution.label,
-      ),
+    final diagnostic = CleanupFailureDiagnostic(
+      outcome: outcome,
+      error: error,
+      executionId: execution.id,
+      executionLabel: execution.label,
     );
+    _emitCleanupFailure(execution.observation, execution.scope, diagnostic);
+    return _notifyCleanupFailureBestEffort(_cleanupFailureObserver, diagnostic);
   }
 
   void _recordDeferredExecutionFailure(Object error, StackTrace stackTrace) {
@@ -538,13 +641,19 @@ final class Runtime {
     try {
       await _rootContext.scope._close(exit);
     } catch (error, stackTrace) {
+      final diagnostic = CleanupFailureDiagnostic(
+        outcome: exit,
+        error: _asScopeReleaseException(error, stackTrace),
+        executionId: 0,
+      );
+      _emitCleanupFailure(
+        _rootContext.observation,
+        _rootContext.scope,
+        diagnostic,
+      );
       await _notifyCleanupFailureBestEffort(
         _cleanupFailureObserver,
-        CleanupFailureDiagnostic(
-          outcome: exit,
-          error: _asScopeReleaseException(error, stackTrace),
-          executionId: 0,
-        ),
+        diagnostic,
       );
       captureError(error, stackTrace);
     }
@@ -597,6 +706,24 @@ final class Runtime {
       throw const RuntimeClosedException();
     }
   }
+}
+
+void _emitCleanupFailure(
+  _ExecutionObservation? observation,
+  Scope scope,
+  CleanupFailureDiagnostic diagnostic,
+) {
+  if (observation == null) {
+    return;
+  }
+
+  observation.observers.cleanupFailure(
+    CleanupFailureEvent(
+      context: observation.context(scope, const <Object, Object>{}),
+      timestamp: DateTime.now(),
+      diagnostic: diagnostic,
+    ),
+  );
 }
 
 ScopeReleaseException _asScopeReleaseException(

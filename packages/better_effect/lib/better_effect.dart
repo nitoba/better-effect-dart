@@ -22,4 +22,5 @@ part 'src/runtime/exit.dart';
 part 'src/runtime/runtime.dart';
 part 'src/runtime/runtime_context.dart';
 part 'src/runtime/runtime_execution_module.dart';
+part 'src/runtime/runtime_observer.dart';
 part 'src/runtime/scope.dart';
