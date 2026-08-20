@@ -1,0 +1,33 @@
+name: Close completed v0.3 milestone
+
+on:
+  push:
+    branches:
+      - automation/close-v0.3-milestone
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  close:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - name: Close milestone v0.3
+        run: |
+          gh api \
+            --method PATCH \
+            "repos/${GITHUB_REPOSITORY}/milestones/2" \
+            -f state=closed \
+            -f description='Released on August 20, 2026. All v0.3 implementation issues are complete and better_effect, better_effect_analyzer, and better_effect_flutter 0.3.0 are published.' \
+            >/dev/null
+
+      - name: Delete temporary automation branch
+        run: |
+          git push \
+            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+            --delete automation/close-v0.3-milestone
