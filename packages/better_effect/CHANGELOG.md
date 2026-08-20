@@ -1,3 +1,17 @@
+## Unreleased
+
+- Added lazy `Effect.all` and `Effect.forEach` collection composition with
+  sequential-by-default and positive bounded concurrency.
+- Added explicit `Effect.allUnbounded` and `Effect.forEachUnbounded` APIs so
+  unbounded fan-out cannot happen through an omitted limit.
+- Collection results preserve input order and are returned as unmodifiable
+  Lists, while scheduling remains FIFO.
+- Typed failure selection is deterministic by lowest started input index; no new
+  work starts after failure or interruption, and already-started operations
+  remain physically owned until completion.
+- Collection defects stay defects, worker resources retain normal Scope cleanup
+  semantics, and sequential/bounded/unbounded benchmarks are included.
+
 ## 0.3.0
 
 - Added `Runtime.executeWith`, `runWith`, and `runExitWith` for temporary

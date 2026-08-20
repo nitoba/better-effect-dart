@@ -1,0 +1,226 @@
+---
+title: Coleções e concorrência limitada
+description: Execute lotes com ordem estável, limites explícitos e ownership físico seguro
+---
+
+`Effect.all` e `Effect.forEach` compõem coleções homogêneas sem adicionar fibers,
+um scheduler público ou uma abstração geral de filas.
+
+```dart
+final users = Effect.forEach(
+  userIds,
+  loadUser,
+  concurrency: 4,
+);
+```
+
+A operação continua lazy: criar o Effect não percorre o Iterable e não chama o
+mapper. Isso acontece somente quando um Runtime executa o programa.
+
+## O padrão é sequencial
+
+Sem configuração adicional, apenas uma operação fica fisicamente ativa:
+
+```dart
+final users = Effect.forEach(
+  userIds,
+  loadUser,
+); // concurrency: 1
+```
+
+Quando as operações forem independentes, informe um limite positivo:
+
+```dart
+final users = Effect.forEach(
+  userIds,
+  loadUser,
+  concurrency: 4,
+);
+```
+
+Concorrência sem limite é uma decisão separada e explícita:
+
+```dart
+final users = Effect.forEachUnbounded(
+  userIds,
+  loadUser,
+);
+```
+
+A mesma API existe para uma coleção que já contém Effects:
+
+```dart
+final dashboardParts = Effect.all([
+  loadProfile(),
+  loadNotifications(),
+  loadPreferences(),
+]);
+```
+
+```dart
+final bounded = Effect.all(
+  requests,
+  concurrency: 8,
+);
+```
+
+```dart
+final unbounded = Effect.allUnbounded(requests);
+```
+
+`concurrency` precisa ser maior que zero. Não existe um número mágico que
+signifique “sem limite”.
+
+## Ordem de saída e scheduling FIFO
+
+Os índices são iniciados em ordem FIFO. O tempo de conclusão não altera a lista
+final:
+
+```text
+início:     0, 1, 2
+conclusão:  2, 0, 1
+resultado:  [valor0, valor1, valor2]
+```
+
+A lista retornada é não modificável. Uma entrada vazia produz uma lista vazia,
+também não modificável.
+
+O número de Futures fisicamente ativos nunca ultrapassa o limite configurado.
+Com `concurrency: 1`, a travessia é sequencial e stack-safe para coleções grandes.
+
+## Falha tipada determinística
+
+Quando um worker observa uma falha tipada:
+
+1. nenhum item novo é iniciado;
+2. operações que já começaram continuam até a conclusão física;
+3. os recursos dessas operações continuam pertencendo ao Scope da execução;
+4. se várias operações iniciadas falharem, vence a falha com o menor índice de
+   entrada.
+
+Exemplo:
+
+```text
+iniciados: 0, 1, 2
+2 falha primeiro
+0 falha depois
+1 termina com sucesso
+
+resultado autoritativo: falha do índice 0
+```
+
+A escolha não depende da ordem de conclusão dos Futures.
+
+## Defect e interrupção
+
+Defects não são convertidos para o canal tipado. Se vários itens iniciados
+produzirem defects, o menor índice determina o defect propagado.
+
+Quando nenhum resultado lógico já foi publicado, a conclusão usa:
+
+```text
+defect do menor índice iniciado
+  > cancelamento observado no boundary da coleção
+  > falha tipada do menor índice iniciado
+  > valores ordenados
+```
+
+`EffectExecution.interrupt()` é um boundary de primeiro resultado: ele publica
+`ExitInterrupted` imediatamente. Um defect que surge depois, enquanto um worker
+iniciado termina fisicamente, não substitui esse resultado; o Runtime o mantém
+como falha física adiada e pode apresentá-lo durante `Runtime.close()`.
+
+Todos os workers compartilham o `CancellationSignal` da execução. Depois que a
+interrupção é observada, nenhum novo item começa. Os Futures já iniciados não
+são cancelados à força, porque Dart não oferece cancelamento genérico.
+
+```dart
+final execution = runtime.execute(batch);
+execution.interrupt(reason: 'screen-disposed');
+
+final exit = await execution.exit;
+```
+
+O caller pode receber `ExitInterrupted` enquanto `execution.isRunning` ainda é
+`true`. O Runtime mantém ownership até os workers iniciados e o cleanup
+terminarem.
+
+## Recursos adquiridos pelos workers
+
+Os itens usam o Scope da execução que contém a coleção:
+
+```dart
+final exports = Effect.forEach(
+  ids,
+  (id) => Effect<Export, ExportFailure>.result((use) async {
+    final file = await use.acquire(
+      openTemporaryFile(id),
+      release: (file, exit) => file.delete(),
+    );
+
+    return createExport(file);
+  }),
+  concurrency: 4,
+);
+```
+
+Mesmo que outro item falhe, produza defect ou a execução seja interrompida, o
+arquivo continua válido enquanto o worker iniciado ainda pode usá-lo. O release
+acontece quando o Scope da coleção fecha.
+
+`Effect.forEach` não cria um Scope por item. Scopes por tentativa pertencem à
+feature de retry, não à composição de coleções.
+
+## Timeout não encerra trabalho físico
+
+```dart
+final timed = batch.timeout(
+  const Duration(seconds: 5),
+  onTimeout: BatchTimedOut.new,
+);
+```
+
+O timeout pode entregar uma falha tipada antes da conclusão física. O Runtime
+continua aguardando os workers e resources iniciados. Quando a API externa tiver
+cancelamento, conecte-a ao `use.cancellation` do item.
+
+## Testes sem sleeps arbitrários
+
+O entrypoint de testes oferece gates determinísticos:
+
+```dart
+final gate = TestGate<User>();
+final started = TestSignal();
+
+final batch = Effect.forEach(
+  userIds,
+  (id) => Effect<User, UserFailure>.result((_) async {
+    started.signal();
+    return gate.future;
+  }),
+  concurrency: 1,
+);
+```
+
+Use `TestRuntime.assertNoActiveExecutions()` depois de liberar todos os gates
+para detectar trabalho físico esquecido.
+
+## Escolha prática
+
+| Situação | API |
+| --- | --- |
+| Ordem e custo previsível | `Effect.forEach(..., concurrency: 1)` |
+| I/O independente com limite do host | `Effect.forEach(..., concurrency: n)` |
+| Coleção já formada por Effects | `Effect.all(...)` |
+| Fan-out pequeno e deliberadamente sem limite | `forEachUnbounded` ou `allUnbounded` |
+| Duas operações que formam um record | `Effect.zip` ou `Effect.parZip` |
+
+Evite `unbounded` para coleções controladas por usuário, filas grandes, uploads
+ou chamadas a serviços com limites de conexão.
+
+## Próximos passos
+
+- [Efeitos e falhas tipadas](./effects)
+- [Recursos e ciclo de vida](./resources-and-lifetimes)
+- [Testando Effects e Commands](./testing)
+- [Observabilidade](./observability)
