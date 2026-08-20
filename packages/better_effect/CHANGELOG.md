@@ -8,10 +8,24 @@
 - Resource release callbacks now receive the `Exit` that closed their Scope.
 - Module resources and `EffectContext.acquire` now share the same Scope
   acquisition lifecycle.
+- Added `Runtime.execute` and typed `EffectExecution<A, E>` handles with IDs,
+  labels, logical exits, physical-running state, and cooperative interruption.
+- `Runtime.run` and `runExit` now delegate to the managed execution path.
+- Runtime shutdown now rejects new work, drains active executions, supports a
+  grace period, and can request cooperative interruption before resource release.
+- Timeouts keep their physical execution Scope owned until the source Future and
+  all resource cleanup complete.
+- Cleanup failures preserve typed failures and interruptions, aggregate with
+  defects, and can be reported through a best-effort observer.
+- Cancellation signals expose the first reason and a cooperative
+  `throwIfCancelled` boundary.
 - `Module.overrideWith` now replaces existing bindings in place and appends only
   new service identities, preserving resource startup and reverse cleanup order.
 - Resource acquisition defects now identify the resource service and optional
   key while preserving the original dependency-resolution cause.
+- Added a bounded, gate-driven regression suite for Scope races, timeout-owned
+  resources, shutdown ordering, concurrent close, outcome authority, and cleanup
+  precedence.
 
 ## 0.1.1
 
