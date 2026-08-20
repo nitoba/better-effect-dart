@@ -290,6 +290,37 @@ final testModule = productionModule.overrideWith([
 Assim o teste usa o mesmo Effect, Runtime, Scope e fluxo de cleanup da aplicação
 real, substituindo apenas a borda de I/O.
 
+## Teste debounce, throttle e overflow
+
+`ManualEffectClock` controla janelas sem sleeps reais, e
+`EffectCommandPolicyProbe` registra decisões:
+
+```dart
+final clock = ManualEffectClock();
+final runtime = await Module([
+  .instance<EffectClock>(clock),
+]).start();
+final probe = EffectCommandPolicyProbe();
+
+final command = EffectCommands(runtime).withInput(
+  search,
+  policy: const CommandPolicy.latest(
+    trigger: TriggerPolicy.debounce(
+      Duration(milliseconds: 300),
+    ),
+  ),
+  policyObserver: probe.call,
+);
+
+final result = command.execute('dart');
+await clock.advance(const Duration(milliseconds: 300));
+await result;
+```
+
+Verifique também os callers substituídos/recusados, o input de
+`retry()`, decisões do probe e `assertNoActiveExecutions()` após
+liberar timers e trabalho físico.
+
 ## Checklist
 
 - registre ou feche explicitamente todo `TestRuntime`;

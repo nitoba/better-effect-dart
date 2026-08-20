@@ -1,0 +1,314 @@
+---
+title: Políticas de Command
+description: Controle drop, latest, queue, debounce e throttle sem criar novas classes de Command
+---
+
+`CommandPolicy` separa duas decisões que antes ficavam concentradas no enum de
+concorrência:
+
+1. **quando** uma chamada fica elegível para executar;
+2. **como** essa chamada interage com trabalho ativo ou enfileirado.
+
+A aplicação continua usando `EffectCommand` e `EffectCommand0`. Não foi criado
+um Command diferente para cada política, um runtime de streams ou um novo tipo
+de `Exit`.
+
+## O caso simples continua simples
+
+```dart
+save = command(saveDraft);
+```
+
+O padrão continua equivalente a `drop`: enquanto uma execução autoritativa está
+ativa, novos callers recebem o mesmo Future e nenhum trabalho duplicado começa.
+
+A forma explícita é:
+
+```dart
+save = command(
+  saveDraft,
+  policy: const CommandPolicy.drop(),
+);
+```
+
+## Compatibilidade com o enum anterior
+
+Código existente continua válido:
+
+```dart
+search = commandWithInput(
+  searchUsers,
+  concurrency: EffectCommandConcurrency.latest,
+);
+```
+
+A tradução é exata:
+
+| Enum de compatibilidade | Política equivalente |
+| --- | --- |
+| `EffectCommandConcurrency.drop` | `CommandPolicy.drop()` |
+| `EffectCommandConcurrency.latest` | `CommandPolicy.latest()` |
+| `EffectCommandConcurrency.queue` | `CommandPolicy.queue()` |
+
+Use `policy` em código novo. Não passe `policy` e `concurrency` juntos.
+
+## Outcomes de decisões da política
+
+Uma chamada substituída pelo debounce, recusada pela fila ou suprimida pelo
+throttle não é uma falha do domínio. O caller recebe `ExitInterrupted`:
+
+```dart
+final exit = await command.execute(input);
+
+switch (exit) {
+  case ExitInterrupted():
+    // Replaced, rejected, dropped, cancelled ou disposed.
+  case ExitFailure(:final error):
+    // O Effect aceito produziu uma falha tipada.
+  case ExitDefect(:final defect):
+    // Houve um defeito inesperado.
+  case ExitSuccess(:final value):
+    // A chamada aceita terminou normalmente.
+}
+```
+
+Assim, a biblioteca não inventa um `E` falso para representar overflow ou
+coalescência. O motivo operacional aparece em `EffectCommandPolicyEvent`.
+
+## `latest` com cancelamento cooperativo
+
+O comportamento padrão de `latest` permanece compatível:
+
+```dart
+search = commandWithInput(
+  searchUsers,
+  policy: const CommandPolicy.latest(),
+);
+```
+
+Todas as chamadas aceitas começam, cada caller recebe seu próprio `Exit`, mas
+somente a mais recente controla o estado visível.
+
+Para solicitar interrupção da execução anterior:
+
+```dart
+search = commandWithInput(
+  searchUsers,
+  policy: const CommandPolicy.latest(
+    cancelPrevious: true,
+  ),
+);
+```
+
+A política chama `EffectExecution.interrupt()` no trabalho anterior. O caller
+anterior recebe `ExitInterrupted` quando a interrupção vence a corrida lógica.
+O Future físico e seus resources continuam pertencendo ao Runtime até terminar.
+Isso não força o cancelamento de qualquer Future Dart.
+
+## Fila limitada e overflow
+
+```dart
+save = commandWithInput(
+  saveDraft,
+  policy: const CommandPolicy.queue(
+    maxPending: 10,
+    overflow: QueueOverflow.dropOldest,
+  ),
+);
+```
+
+`maxPending` conta callers esperando atrás da execução ativa. `null` significa
+fila sem limite; zero não admite espera.
+
+| Overflow | Resultado |
+| --- | --- |
+| `rejectNewest` | Recusa o caller novo com `ExitInterrupted`. |
+| `dropNewest` | Descarta o caller novo com `ExitInterrupted`. |
+| `dropOldest` | Interrompe o caller mais antigo da fila e admite o novo. |
+
+`rejectNewest` e `dropNewest` têm o mesmo outcome para o caller, mas eventos de
+política diferentes. Isso permite separar capacidade rejeitada de descarte
+intencional em métricas.
+
+Uma entrada recusada ou descartada como mais nova não substitui o input usado
+por `retry()`. Uma entrada admitida após `dropOldest` passa a ser o último input
+aceito.
+
+## Debounce
+
+Triggers temporais existem somente em Commands com input tipado:
+
+```dart
+search = commandWithInput(
+  searchUsers,
+  policy: const CommandPolicy.latest(
+    trigger: TriggerPolicy.debounce(
+      Duration(milliseconds: 300),
+    ),
+  ),
+);
+```
+
+O padrão é trailing-only. Cada input novo substitui o pending anterior, reinicia
+a janela e completa o caller substituído com `ExitInterrupted`. Quando o tempo
+de silêncio termina, somente o input mais recente entra na política de execução.
+
+Leading e trailing são explícitos:
+
+```dart
+const TriggerPolicy.debounce(
+  Duration(milliseconds: 300),
+  leading: true,
+  trailing: true,
+)
+```
+
+Com os dois habilitados, o primeiro input executa imediatamente e o último input
+da janela executa na borda trailing. Em leading-only, a primeira chamada executa
+e as demais são suprimidas até a origem permanecer silenciosa pela duração.
+
+## Throttle
+
+```dart
+search = commandWithInput(
+  searchUsers,
+  policy: const CommandPolicy.latest(
+    trigger: TriggerPolicy.throttle(
+      Duration(milliseconds: 500),
+      leading: true,
+      trailing: true,
+    ),
+  ),
+);
+```
+
+O padrão é leading-only: uma chamada começa imediatamente e as demais na mesma
+janela recebem `ExitInterrupted`.
+
+Com trailing habilitado, somente o input pending mais recente sobrevive até o
+fim da janela. Uma execução trailing abre a próxima janela imediatamente, então
+input contínuo continua limitado a uma execução por duração.
+
+## Trigger e coordenação são composáveis
+
+```dart
+final policy = const CommandPolicy.queue(
+  maxPending: 3,
+  overflow: QueueOverflow.dropOldest,
+  trigger: TriggerPolicy.debounce(
+    Duration(milliseconds: 250),
+  ),
+);
+```
+
+Primeiro os inputs são debounced. Depois, a chamada elegível entra na fila. O
+trigger não ignora `drop`, autoridade de `latest`, limites da queue nem overflow.
+
+## `EffectClock` é obrigatório somente quando usado
+
+Debounce e throttle usam o serviço contextual `EffectClock`:
+
+```dart
+final appModule = Module([
+  .instance<EffectClock>(const SystemEffectClock()),
+  // demais serviços...
+]);
+```
+
+Nada é instalado implicitamente. Commands com trigger imediato não resolvem um
+Clock. Um Command temporal sem `EffectClock` retorna `ExitDefect` e publica
+`EffectCommandDefect`.
+
+O timer é uma execução gerenciada pelo Runtime. Shutdown, cancelamento e dispose
+chegam ao mesmo `CancellationSignal` usado pelos Effects normais.
+
+## Retry input
+
+`retry()` passa novamente o último input aceito pela mesma política:
+
+- `drop` não memoriza um input coalescido;
+- `latest` memoriza toda chamada aceita;
+- queue memoriza entradas admitidas, não `rejectNewest`/`dropNewest`;
+- debounce memoriza o trailing pending;
+- throttle memoriza leading ou trailing aceito, não chamadas suprimidas.
+
+O próprio retry pode ser enfileirado, debounced, throttled, coalescido ou
+recusado.
+
+## Cancelamento, reset e dispose
+
+`cancel(clearQueued: true)`:
+
+- interrompe a execução autoritativa;
+- completa callers da queue com `ExitInterrupted`;
+- interrompe o trailing pending;
+- cancela a janela de debounce/throttle.
+
+Com `clearQueued: false`, a fila continua e o próximo caller começa depois que a
+autoridade ativa é revogada. Callers que ainda esperam a borda do trigger não
+são apagados porque o caller pediu preservação da fila.
+
+`reset()` retorna `false` enquanto existir execução, queue, trailing pending ou
+janela temporal. `dispose()` interrompe cada execução, timer e caller pendente
+uma única vez.
+
+## Observe decisões sem expor inputs
+
+```dart
+final commands = EffectCommands(
+  runtime,
+  policyObserver: (event) {
+    logger.debug(
+      'command.policy',
+      metadata: {
+        'label': event.debugLabel,
+        'decision': event.decision.name,
+        'reason': event.reason?.name,
+        'invocationId': event.invocationId,
+        'executionId': event.executionId,
+        'pending': event.pendingCount,
+        'queued': event.queuedCount,
+      },
+    );
+  },
+);
+```
+
+O evento não inclui input nem valor do Effect. Falhas do observer são enviadas
+para o mecanismo de erros do Flutter e não mudam decisões ou outcomes.
+
+`BetterEffectProvider`, `BetterEffectBootstrap` e `runBetterEffectApp` também
+aceitam um `policyObserver` compartilhado.
+
+## Teste sem esperar o relógio real
+
+```dart
+import 'package:better_effect_flutter/testing.dart';
+
+final clock = ManualEffectClock();
+final runtime = await Module([
+  .instance<EffectClock>(clock),
+]).start();
+
+final command = EffectCommands(runtime).withInput<String, Results, Failure>(
+  search,
+  policy: const CommandPolicy.latest(
+    trigger: TriggerPolicy.debounce(
+      Duration(milliseconds: 300),
+    ),
+  ),
+);
+
+final result = command.execute('dart');
+await clock.advance(const Duration(milliseconds: 300));
+expect(await result, isExitSuccess<Results, Failure>());
+```
+
+`EffectCommandPolicyProbe` registra a ordem das decisões e seus motivos sem
+adicionar um framework de mocks.
+
+## Próximos passos
+
+- [Flutter MVVM](./flutter-mvvm)
+- [Testando Effects e Commands](./testing)
+- [Observabilidade](./observability)

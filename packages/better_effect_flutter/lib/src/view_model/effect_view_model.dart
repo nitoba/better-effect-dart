@@ -15,20 +15,24 @@ abstract class EffectViewModel extends ChangeNotifier with EffectCommandOwner {
   @protected
   EffectCommand0<A, E> command<A extends Object, E extends Object>(
     Effect<A, E> Function() action, {
-    EffectCommandConcurrency concurrency = EffectCommandConcurrency.drop,
+    CommandPolicy? policy,
+    EffectCommandConcurrency? concurrency,
     bool keepPreviousData = true,
     String? debugLabel,
     VoidCallback? onCancel,
     EffectCommandStateObserver<A, E>? stateObserver,
+    EffectCommandPolicyObserver? policyObserver,
   }) {
     return ownCommand(
       commands<A, E>(
         action,
+        policy: policy,
         concurrency: concurrency,
         keepPreviousData: keepPreviousData,
         debugLabel: debugLabel,
         onCancel: onCancel,
         stateObserver: stateObserver,
+        policyObserver: policyObserver,
       ),
     );
   }
@@ -38,20 +42,24 @@ abstract class EffectViewModel extends ChangeNotifier with EffectCommandOwner {
   EffectCommand<I, A, E>
   commandWithInput<I, A extends Object, E extends Object>(
     Effect<A, E> Function(I input) action, {
-    EffectCommandConcurrency concurrency = EffectCommandConcurrency.drop,
+    CommandPolicy? policy,
+    EffectCommandConcurrency? concurrency,
     bool keepPreviousData = true,
     String? debugLabel,
     VoidCallback? onCancel,
     EffectCommandStateObserver<A, E>? stateObserver,
+    EffectCommandPolicyObserver? policyObserver,
   }) {
     return ownCommand(
       commands.withInput<I, A, E>(
         action,
+        policy: policy,
         concurrency: concurrency,
         keepPreviousData: keepPreviousData,
         debugLabel: debugLabel,
         onCancel: onCancel,
         stateObserver: stateObserver,
+        policyObserver: policyObserver,
       ),
     );
   }

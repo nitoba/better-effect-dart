@@ -50,16 +50,34 @@ Repository used by every action. Commands are disposed in reverse creation
 order when the ViewModel is disposed. The application Runtime is owned
 separately by `BetterEffectProvider`, `BetterEffectBootstrap`, or the caller.
 
-## Execution policies
+
+## Execution and trigger policies
 
 ```text
-drop    duplicate work is not started
-latest  stale completions cannot update UI state
-queue   one authoritative execution runs at a time
+input invocation
+  ↓
+TriggerPolicy: immediate | debounce | throttle
+  ↓
+CommandPolicy: drop | latest | queue
+  ↓
+managed EffectExecution
+  ↓
+visible state authority + caller Exit
 ```
 
-These policies coordinate presentation updates. They do not claim fiber-style
-cancellation for arbitrary Dart Futures.
+The trigger stage controls when an input is eligible. The execution
+stage controls active/queued work. Combining them keeps one
+`EffectCommand` abstraction while supporting cancel-previous,
+leading/trailing timing, bounded queues, and overflow behavior.
+
+Policy rejection or replacement completes the affected caller with
+`ExitInterrupted`; it is not represented as a domain failure. Timed
+policies use the contextual `EffectClock`, and their timers are
+managed Runtime executions so shutdown and disposal share the same
+cooperative ownership model.
+
+Existing `EffectCommandConcurrency` values remain compatibility
+shorthands for the corresponding immediate policies.
 
 ## Typed failures and one-shot events
 

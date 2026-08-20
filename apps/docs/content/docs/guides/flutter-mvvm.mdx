@@ -171,6 +171,38 @@ Cancelar um Command interrompe a posse do resultado e ignora a conclusão velha;
 Futures Dart não podem ser forçados a parar, então APIs canceláveis podem ser
 conectadas com `onCancel`.
 
+## Evolua concorrência com `CommandPolicy`
+
+Os valores antigos continuam válidos, mas políticas permitem
+combinar coordenação e timing:
+
+```dart
+search = commandWithInput(
+  searchProducts,
+  policy: const CommandPolicy.latest(
+    cancelPrevious: true,
+    trigger: TriggerPolicy.debounce(
+      Duration(milliseconds: 300),
+    ),
+  ),
+);
+```
+
+Para writes ordenados, limite a fila e escolha o overflow:
+
+```dart
+sync = commandWithInput(
+  persistChange,
+  policy: const CommandPolicy.queue(
+    maxPending: 20,
+    overflow: QueueOverflow.dropOldest,
+  ),
+);
+```
+
+Veja [Políticas de Command](./command-policies) para outcomes de
+callers, leading/trailing, retry input, lifecycle e observabilidade.
+
 ## Teste com o mesmo fluxo da produção
 
 Substitua apenas o serviço que muda no teste:

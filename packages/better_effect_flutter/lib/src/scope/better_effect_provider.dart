@@ -1,17 +1,12 @@
 part of '../../better_effect_flutter.dart';
 
 /// Places an existing [Runtime] in the Flutter tree with explicit ownership.
-///
-/// The default constructor is application-owned for migration compatibility: it
-/// closes on widget disposal and coordinates supported application-exit events.
-/// Use [BetterEffectProvider.value] for a Runtime owned by another boundary, or
-/// set [ownership] to [BetterEffectRuntimeOwnership.widget] for a feature root
-/// that should only follow widget lifetime.
 final class BetterEffectProvider extends StatefulWidget {
   const BetterEffectProvider({
     required this.runtime,
     required this.child,
     this.observer,
+    this.policyObserver,
     this.ownership = BetterEffectRuntimeOwnership.application,
     this.lifecyclePolicy = const BetterEffectLifecyclePolicy.application(),
     @Deprecated(
@@ -37,6 +32,7 @@ final class BetterEffectProvider extends StatefulWidget {
     required this.runtime,
     required this.child,
     this.observer,
+    this.policyObserver,
     this.onRuntimeCloseError,
     super.key,
   }) : ownership = BetterEffectRuntimeOwnership.external,
@@ -45,20 +41,13 @@ final class BetterEffectProvider extends StatefulWidget {
        _legacyCloseOnApplicationExit = null;
 
   final Runtime runtime;
-
   final Widget child;
-
   final EffectCommandObserver? observer;
-
-  /// Who is responsible for closing [runtime].
+  final EffectCommandPolicyObserver? policyObserver;
   final BetterEffectRuntimeOwnership ownership;
-
-  /// Shutdown triggers and cooperative interruption options for owned Runtimes.
   final BetterEffectLifecyclePolicy lifecyclePolicy;
-
   final bool? _legacyCloseOnWidgetDispose;
   final bool? _legacyCloseOnApplicationExit;
-
   final void Function(Object error, StackTrace stackTrace)? onRuntimeCloseError;
 
   BetterEffectLifecyclePolicy get _effectiveLifecyclePolicy {
@@ -109,7 +98,9 @@ final class _BetterEffectProviderState extends State<BetterEffectProvider> {
     super.didUpdateWidget(oldWidget);
 
     final runtimeChanged = !identical(oldWidget.runtime, widget.runtime);
-    final observerChanged = !identical(oldWidget.observer, widget.observer);
+    final observersChanged =
+        !identical(oldWidget.observer, widget.observer) ||
+        !identical(oldWidget.policyObserver, widget.policyObserver);
     final lifecycleChanged =
         oldWidget.ownership != widget.ownership ||
         oldWidget.lifecyclePolicy != widget.lifecyclePolicy ||
@@ -128,8 +119,12 @@ final class _BetterEffectProviderState extends State<BetterEffectProvider> {
           _closeRuntime(oldWidget.runtime, oldWidget._closeConfiguration),
         );
       }
-    } else if (observerChanged && _runtime != null) {
-      _commands = EffectCommands(_runtime!, observer: widget.observer);
+    } else if (observersChanged && _runtime != null) {
+      _commands = EffectCommands(
+        _runtime!,
+        observer: widget.observer,
+        policyObserver: widget.policyObserver,
+      );
     }
 
     if (lifecycleChanged) {
@@ -173,7 +168,11 @@ final class _BetterEffectProviderState extends State<BetterEffectProvider> {
 
   void _publish(Runtime runtime) {
     _runtime = runtime;
-    _commands = EffectCommands(runtime, observer: widget.observer);
+    _commands = EffectCommands(
+      runtime,
+      observer: widget.observer,
+      policyObserver: widget.policyObserver,
+    );
   }
 
   void _configureLifecycleListener() {

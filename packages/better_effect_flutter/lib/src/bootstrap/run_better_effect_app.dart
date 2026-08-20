@@ -12,15 +12,12 @@ part of '../../better_effect_flutter.dart';
 ///   );
 /// }
 /// ```
-///
-/// The Runtime is exposed through [BetterEffectScope]. Its shutdown follows
-/// [lifecyclePolicy], including cooperative interruption and grace-period
-/// behavior.
 Future<void> runBetterEffectApp({
   required Module module,
   required Widget app,
   ResolverBackend? backend,
   EffectCommandObserver? observer,
+  EffectCommandPolicyObserver? policyObserver,
   BetterEffectLifecyclePolicy lifecyclePolicy =
       const BetterEffectLifecyclePolicy.application(),
   @Deprecated(
@@ -61,6 +58,7 @@ Future<void> runBetterEffectApp({
       BetterEffectProvider(
         runtime: runtime,
         observer: observer,
+        policyObserver: policyObserver,
         ownership: BetterEffectRuntimeOwnership.application,
         lifecyclePolicy: effectivePolicy,
         onRuntimeCloseError: onRuntimeCloseError,

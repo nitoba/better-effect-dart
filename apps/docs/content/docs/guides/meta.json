@@ -9,6 +9,7 @@
     "execution-scoped-modules",
     "observability",
     "flutter-mvvm",
+    "command-policies",
     "testing",
     "diagnostics"
   ]
