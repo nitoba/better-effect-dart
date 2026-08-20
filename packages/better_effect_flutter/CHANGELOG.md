@@ -7,6 +7,18 @@
 - Existing `drop`, `latest`, and `queue` state-authority semantics remain
   unchanged; `latest` does not cancel stale work unless a future policy opts in.
 - Runtime shutdown interruption now reaches visible Command state.
+- Added explicit `BetterEffectRuntimeOwnership` values for external, widget, and
+  application-owned Runtimes.
+- Added `BetterEffectLifecyclePolicy` for widget disposal, application exit,
+  cooperative interruption, and shutdown grace periods.
+- Providers and bootstrap roots now remove a Runtime from the widget tree before
+  lifecycle-triggered shutdown begins.
+- Runtime replacement closes the previous owned Runtime exactly once, while
+  `BetterEffectProvider.value` never assumes ownership.
+- `BetterEffectBootstrap` now restarts when `backendFactory` changes and closes
+  stale startup attempts safely.
+- Existing `closeRuntimeOnDispose` and `closeRuntimeOnDetach` constructor
+  arguments remain as deprecated migration parameters.
 
 ## 0.1.1
 
