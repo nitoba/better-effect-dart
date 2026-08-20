@@ -8,6 +8,7 @@ enum RuntimeObserverCallback {
   serviceAcquire,
   resourceRelease,
   interruption,
+  retry,
   cleanupFailure,
 }
 
@@ -212,6 +213,44 @@ final class InterruptionEvent {
   final bool publishesLogicalInterruption;
 }
 
+/// Why a retry loop continued or stopped after one attempt.
+enum RetryDecision {
+  retryScheduled,
+  succeeded,
+  policyStopped,
+  failureRejected,
+  interrupted,
+  defect,
+  cleanupFailed,
+}
+
+/// Immutable projection of one retry decision.
+final class RetryEvent {
+  const RetryEvent({
+    required this.context,
+    required this.timestamp,
+    required this.attempt,
+    required this.policyType,
+    required this.decision,
+    required this.previousFailure,
+    required this.plannedDelay,
+    required this.defect,
+    required this.stackTrace,
+  });
+
+  final RuntimeEventContext context;
+  final DateTime timestamp;
+  final int attempt;
+  final Type policyType;
+  final RetryDecision decision;
+  final Object? previousFailure;
+  final Duration? plannedDelay;
+  final Object? defect;
+  final StackTrace? stackTrace;
+
+  bool get willRetry => decision == RetryDecision.retryScheduled;
+}
+
 /// Runtime-observer projection of an existing cleanup diagnostic.
 final class CleanupFailureEvent {
   const CleanupFailureEvent({
@@ -261,6 +300,8 @@ abstract base class RuntimeObserver {
   void onResourceRelease(ResourceReleaseEvent event) {}
 
   void onInterruption(InterruptionEvent event) {}
+
+  void onRetry(RetryEvent event) {}
 
   void onCleanupFailure(CleanupFailureEvent event) {}
 }
@@ -325,6 +366,14 @@ final class _RuntimeObservers {
       RuntimeObserverCallback.interruption,
       event,
       (observer) => observer.onInterruption(event),
+    );
+  }
+
+  void retry(RetryEvent event) {
+    _notify(
+      RuntimeObserverCallback.retry,
+      event,
+      (observer) => observer.onRetry(event),
     );
   }
 

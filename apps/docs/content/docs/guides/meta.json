@@ -4,6 +4,7 @@
     "index",
     "effects",
     "collection-composition",
+    "retry",
     "resources-and-lifetimes",
     "execution-scoped-modules",
     "observability",

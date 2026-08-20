@@ -73,6 +73,9 @@ final class _RecordingObserver extends RuntimeObserver {
   void onInterruption(InterruptionEvent event) => events.add(event);
 
   @override
+  void onRetry(RetryEvent event) => events.add(event);
+
+  @override
   void onCleanupFailure(CleanupFailureEvent event) => events.add(event);
 }
 
@@ -96,6 +99,9 @@ final class _ThrowingObserver extends RuntimeObserver {
 
   @override
   void onInterruption(InterruptionEvent event) => _fail();
+
+  @override
+  void onRetry(RetryEvent event) => _fail();
 
   @override
   void onCleanupFailure(CleanupFailureEvent event) => _fail();
@@ -426,7 +432,7 @@ void main() {
               release: (_, _) => throw StateError('release failed'),
             );
             return 1;
-          }),
+          }).retry(RetryPolicy<Never>.none()),
           executionLabel: 'cleanup',
         );
         expect(cleanupExit, isA<ExitDefect<int, Never>>());
@@ -458,6 +464,7 @@ void main() {
         expect(recording.ofType<ServiceAcquireEvent>(), hasLength(1));
         expect(recording.ofType<ResourceReleaseEvent>(), hasLength(1));
         expect(recording.ofType<CleanupFailureEvent>(), hasLength(1));
+        expect(recording.ofType<RetryEvent>(), hasLength(1));
         expect(recording.ofType<InterruptionEvent>(), hasLength(1));
       },
     );

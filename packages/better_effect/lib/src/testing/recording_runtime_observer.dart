@@ -128,6 +128,9 @@ final class RecordingRuntimeObserver extends RuntimeObserver {
   void onInterruption(InterruptionEvent event) => _record(event);
 
   @override
+  void onRetry(RetryEvent event) => _record(event);
+
+  @override
   void onCleanupFailure(CleanupFailureEvent event) => _record(event);
 
   void _record(Object event) {

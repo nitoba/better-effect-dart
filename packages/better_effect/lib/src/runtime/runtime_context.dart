@@ -1,5 +1,17 @@
 part of '../../better_effect.dart';
 
+typedef _NestedCleanupFailureReporter =
+    Future<void> Function(
+      ScopeReleaseException error,
+      Exit<Object, Object> outcome,
+      Scope scope,
+    );
+
+typedef _NestedScopeCloseResult<A extends Object, E extends Object> = ({
+  Exit<A, E> outcome,
+  bool cleanupFailed,
+});
+
 final class _ServiceIdentity {
   const _ServiceIdentity(this.type, this.key);
 
@@ -23,6 +35,7 @@ final class _RuntimeContext {
     required this.overrides,
     required this.locals,
     required this.observation,
+    required this.cleanupFailureReporter,
   });
 
   final ResolverBackend backend;
@@ -31,6 +44,7 @@ final class _RuntimeContext {
   final Map<_ServiceIdentity, Object> overrides;
   final Map<Object, Object> locals;
   final _ExecutionObservation? observation;
+  final _NestedCleanupFailureReporter? cleanupFailureReporter;
 
   T _resolve<T extends Object>([ServiceKey<T>? key]) {
     final identity = _ServiceIdentity(T, key?._backendKey);
@@ -216,10 +230,51 @@ final class _RuntimeContext {
     scope._trackPhysical(operation);
   }
 
+  Future<_NestedScopeCloseResult<A, E>> _closeNestedScope<
+    A extends Object,
+    E extends Object
+  >(Scope childScope, Exit<A, E> outcome) async {
+    try {
+      await childScope._close(outcome);
+      return (outcome: outcome, cleanupFailed: false);
+    } catch (error, stackTrace) {
+      final releaseError = _asScopeReleaseException(error, stackTrace);
+      final reporter = cleanupFailureReporter;
+      if (reporter != null) {
+        await reporter(releaseError, outcome, childScope);
+      }
+
+      if (outcome is ExitSuccess<A, E>) {
+        return (
+          outcome: ExitDefect<A, E>(error, stackTrace),
+          cleanupFailed: true,
+        );
+      }
+
+      if (outcome is ExitDefect<A, E>) {
+        return (
+          outcome: ExitDefect<A, E>(
+            CompositeDefect(
+              primary: outcome.defect,
+              primaryStackTrace: outcome.stackTrace,
+              secondary: error,
+              secondaryStackTrace: stackTrace,
+            ),
+            outcome.stackTrace,
+          ),
+          cleanupFailed: true,
+        );
+      }
+
+      return (outcome: outcome, cleanupFailed: true);
+    }
+  }
+
   _RuntimeContext _withScope(
     Scope childScope, {
     required CancellationSignal cancellation,
     required _ExecutionObservation? observation,
+    _NestedCleanupFailureReporter? cleanupFailureReporter,
   }) {
     return _RuntimeContext(
       backend: backend,
@@ -228,6 +283,8 @@ final class _RuntimeContext {
       overrides: overrides,
       locals: locals,
       observation: observation,
+      cleanupFailureReporter:
+          cleanupFailureReporter ?? this.cleanupFailureReporter,
     );
   }
 
@@ -244,6 +301,7 @@ final class _RuntimeContext {
       overrides: <_ServiceIdentity, Object>{...overrides, identity: instance},
       locals: locals,
       observation: observation,
+      cleanupFailureReporter: cleanupFailureReporter,
     );
   }
 
@@ -260,6 +318,7 @@ final class _RuntimeContext {
       overrides: overrides,
       locals: updated,
       observation: observation,
+      cleanupFailureReporter: cleanupFailureReporter,
     );
   }
 }

@@ -60,6 +60,7 @@ Effect<A, E> _withExecutionModule<A extends Object, E extends Object>(
       overrides: rootContext.overrides,
       locals: rootContext.locals,
       observation: rootContext.observation,
+      cleanupFailureReporter: rootContext.cleanupFailureReporter,
     );
 
     await _installExecutionModule(module, overlayContext);

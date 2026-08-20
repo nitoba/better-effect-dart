@@ -103,6 +103,29 @@ continueWork.signal();
 Use esses primitives para testar timeout, cancel-first, completion-first,
 `latest`, fila e shutdown sem depender da velocidade da máquina.
 
+## Avance o retry sem esperar tempo real
+
+`ManualEffectClock` controla os sleeps usados por retry:
+
+```dart
+final clock = ManualEffectClock();
+final harness = await TestRuntime.start(
+  Module([.instance<EffectClock>(clock)]),
+  registerCleanup: (cleanup) => addTearDown(cleanup),
+);
+
+final scheduled = harness.observer.next<RetryEvent>(
+  where: (event) => event.decision == RetryDecision.retryScheduled,
+);
+final execution = harness.execute(request.retry(policy));
+
+expect((await scheduled).plannedDelay, const Duration(seconds: 1));
+await clock.advance(const Duration(seconds: 1));
+```
+
+O teste não depende da velocidade da máquina. Interromper a execução
+também remove o sleep manual pendente sem iniciar outra tentativa.
+
 ## Verifique ordem de recursos
 
 `TestEventRecorder<T>` mantém uma sequência imutável para aquisição e cleanup:

@@ -9,6 +9,7 @@ description: Effects, dependency injection, scopes, recursos e observabilidade p
 
 - `Effect<A, E>` para operações lazy com falha tipada;
 - `Effect.all` e `Effect.forEach` para coleções ordenadas com concorrência limitada;
+- `Effect.retry` para falhas tipadas com policies e um Scope por tentativa;
 - `Module` para declarar serviços, lifetimes e resources;
 - `Runtime` e `Scope` para controlar execução e ciclo de vida;
 - `EffectExecution` para interrupção cooperativa e ownership físico;
@@ -82,6 +83,24 @@ Fan-out sem limite precisa ser escolhido explicitamente com
 `Effect.forEachUnbounded` ou `Effect.allUnbounded`. Depois de falha, defect ou
 interrupção, nenhum item novo começa; os itens já iniciados continuam pertencendo
 à execução até a conclusão física.
+
+## Repita apenas falhas tipadas
+
+```dart
+final resilient = loadGreeting().retry(
+  RetryPolicy.exponential(
+    maxAttempts: 4,
+    initialDelay: const Duration(milliseconds: 200),
+    maxDelay: const Duration(seconds: 3),
+  ),
+);
+```
+
+A execução inicial conta como tentativa um. Cada tentativa recebe um
+Scope filho, e seus resources fecham antes do delay ou da próxima
+tentativa. Defects não são repetidos. Delays e jitter usam
+`EffectClock` e `EffectRandom` registrados explicitamente; o Runtime não
+instala serviços globais.
 
 ## Module e Runtime
 
@@ -221,6 +240,7 @@ diferentes.
 
 - [Efeitos e falhas tipadas](../guides/effects)
 - [Coleções e concorrência limitada](../guides/collection-composition)
+- [Retry determinístico](../guides/retry)
 - [Recursos e ciclo de vida](../guides/resources-and-lifetimes)
 - [Modules por execução](../guides/execution-scoped-modules)
 - [Observabilidade](../guides/observability)

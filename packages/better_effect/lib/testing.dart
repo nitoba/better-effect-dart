@@ -7,6 +7,7 @@ library;
 
 export 'better_effect.dart';
 export 'src/testing/exit_matchers.dart';
+export 'src/testing/manual_effect_clock.dart';
 export 'src/testing/recording_runtime_observer.dart';
 export 'src/testing/resolver_backend_contract.dart';
 export 'src/testing/test_primitives.dart';

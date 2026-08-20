@@ -67,6 +67,7 @@ For one managed execution, callbacks are emitted in registration order using thi
 ExecutionStart
   ├── ServiceResolve*
   ├── ServiceAcquire*
+  ├── Retry*                   // attempt decisions and planned delays
   ├── Interruption?            // first cancellation request only
   ├── ResourceRelease*         // reverse Scope ownership order
   ├── CleanupFailure?          // after failed releases are aggregated
@@ -163,6 +164,18 @@ Successful requests start with the requested service. For AutoInjector missing-s
 - the `Exit` that closed the Scope during release.
 
 The observer wraps the same atomic `Scope.acquire` path used by normal execution. Instrumentation does not introduce a second registration or cleanup mechanism.
+
+## Retry decisions
+
+`RetryEvent` identifies the one-based attempt, policy type, previous
+typed failure, planned delay, and the decision that continued or stopped
+the loop. `onRetry` uses the same execution ID, label, Scope identity,
+and selected local metadata as the surrounding managed execution.
+
+A cleanup failure still appears through `onCleanupFailure`; the retry
+event then explains that the loop stopped with
+`RetryDecision.cleanupFailed`. Observer failures remain isolated from
+both policy decisions and Effect outcomes.
 
 ## Benchmarking the fast path
 

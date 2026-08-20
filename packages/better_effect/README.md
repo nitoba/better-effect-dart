@@ -398,6 +398,7 @@ Every `Effect<A, E>` has the following operators:
 | `.provide(value)` | Override one service for this Effect only. |
 | `.withLocal(local, value)` | Override one `EffectLocal` for this Effect only. |
 | `.timeout(duration, onTimeout: ...)` | Return a typed timeout failure if the Effect does not finish in time. |
+| `.retry(policy, whileError: ...)` | Re-run eligible typed failures with one child Scope per attempt. |
 | `.either()` | Move the typed failure into a successful `ResultDart` value. |
 
 Use `Effect.zip` for sequential composition that returns a Dart record:
@@ -429,6 +430,31 @@ The `timeout` operator has the same Dart Future limitation: it returns the
 timeout result, but it cannot cancel work already running underneath. The
 Runtime keeps that execution Scope alive until the underlying Future finishes,
 so a late `use.acquire` can still register and release its resource safely.
+
+### Retry typed failures
+
+```dart
+final resilient = loadRemoteData().retry(
+  RetryPolicy.exponential(
+    maxAttempts: 4,
+    initialDelay: const Duration(milliseconds: 200),
+    maxDelay: const Duration(seconds: 3),
+  ),
+  whileError: (error) => error is TemporaryNetworkFailure,
+);
+```
+
+`maxAttempts` includes the initial run. Only typed failures are
+eligible; success, defects, and interruption stop immediately. Each
+attempt owns a child Scope, so its `use.acquire` resources close before
+the next delay or attempt.
+
+Positive delays use an explicitly registered `EffectClock`; full jitter
+uses an explicitly registered `EffectRandom`. Neither service is
+installed globally or automatically. Tests can use `ManualEffectClock`
+from `package:better_effect/testing.dart`. See
+[`doc/retry.md`](doc/retry.md) for policies, cleanup precedence,
+interruption, observability, and deterministic tests.
 
 ### Interoperate with `result_dart`
 
