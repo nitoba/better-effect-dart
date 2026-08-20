@@ -78,6 +78,27 @@ recebe somente a fábrica de Commands do subtree.
 Na UI, use `EffectCommandBuilder` para estados de loading/sucesso/falha e
 `EffectCommandListener` para snackbar, navegação ou outro efeito imperativo.
 
+## Políticas extensíveis
+
+```dart
+search = commandWithInput(
+  searchUsers,
+  policy: const CommandPolicy.latest(
+    cancelPrevious: true,
+    trigger: TriggerPolicy.debounce(
+      Duration(milliseconds: 300),
+    ),
+  ),
+);
+```
+
+`CommandPolicy` combina coordenação (`drop`, `latest`, `queue`)
+com timing opcional (`debounce`, `throttle`). Filas podem ser
+limitadas e definir overflow; decisões rejeitadas ou substituídas
+usam `ExitInterrupted`, sem inventar falhas de domínio.
+
+Consulte o [guia de políticas de Command](../guides/command-policies).
+
 Veja o [guia de Flutter MVVM](../guides/flutter-mvvm) e o exemplo incluído em
 `packages/better_effect_flutter/example`.
 

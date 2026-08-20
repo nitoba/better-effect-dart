@@ -18,6 +18,7 @@ import 'package:flutter/widgets.dart';
 export 'package:better_effect/better_effect.dart';
 
 part 'src/bootstrap/run_better_effect_app.dart';
+part 'src/command/command_policy.dart';
 part 'src/command/effect_command.dart';
 part 'src/command/effect_command_concurrency.dart';
 part 'src/command/effect_command_state.dart';

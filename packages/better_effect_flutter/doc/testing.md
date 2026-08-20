@@ -160,3 +160,38 @@ addTearDown(() async {
 
 Call `harness.assertNoActiveExecutions()` after releasing all gates to catch a
 test that observed a logical result while leaving physical work running.
+
+## Test Command policies deterministically
+
+Install `ManualEffectClock` through the normal Module:
+
+```dart
+final clock = ManualEffectClock();
+final runtime = await Module([
+  .instance<EffectClock>(clock),
+]).start();
+
+final probe = EffectCommandPolicyProbe();
+final command = EffectCommands(runtime).withInput<
+  String,
+  Results,
+  SearchFailure
+>(
+  search,
+  policy: const CommandPolicy.latest(
+    trigger: TriggerPolicy.debounce(
+      Duration(milliseconds: 300),
+    ),
+  ),
+  policyObserver: probe.call,
+);
+
+final result = command.execute('dart');
+await clock.advance(const Duration(milliseconds: 300));
+expect(await result, isExitSuccess<Results, SearchFailure>());
+```
+
+The policy probe records started, queued, replaced, rejected,
+dropped, trigger, cancellation, and defect decisions. No input or
+Effect value is included in an event. Release every gate, pending
+clock window, and physical execution before closing the Runtime.

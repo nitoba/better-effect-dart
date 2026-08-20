@@ -488,6 +488,48 @@ toggle = commandWithInput(
 Calls are executed serially in request order. Use it for ordered writes,
 uploads, or toggles where every user intent matters.
 
+## Extensible Command policies
+
+New code can coordinate execution and input timing with one
+immutable `CommandPolicy`:
+
+```dart
+search = commandWithInput(
+  searchUsers,
+  policy: const CommandPolicy.latest(
+    cancelPrevious: true,
+    trigger: TriggerPolicy.debounce(
+      Duration(milliseconds: 300),
+    ),
+  ),
+);
+```
+
+The existing `EffectCommandConcurrency.drop`, `latest`, and
+`queue` arguments remain source-compatible and map exactly to
+`CommandPolicy.drop()`, `latest()`, and `queue()`.
+
+Bounded queues define caller outcomes explicitly:
+
+```dart
+save = commandWithInput(
+  saveDraft,
+  policy: const CommandPolicy.queue(
+    maxPending: 10,
+    overflow: QueueOverflow.dropOldest,
+  ),
+);
+```
+
+Debounce and throttle are available only for Commands with input
+and use an explicitly installed `EffectClock`. Replaced,
+suppressed, or overflowed callers receive `ExitInterrupted`;
+typed domain failures remain `ExitFailure<E>`.
+
+See [`doc/command_policies.md`](doc/command_policies.md) for
+leading/trailing timing, queue overflow, retry-input rules,
+cancellation, observability, and deterministic tests.
+
 ## Cancellation, retry, and reset
 
 Dart Futures are not generally cancellable. `command.cancel()` publishes

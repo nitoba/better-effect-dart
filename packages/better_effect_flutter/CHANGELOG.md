@@ -1,3 +1,21 @@
+## Unreleased
+
+- Added immutable `CommandPolicy.drop`, `latest`, and `queue`
+  coordination without adding new Command classes.
+- Added optional cooperative previous-execution interruption for
+  `CommandPolicy.latest(cancelPrevious: true)`.
+- Added typed-input debounce and throttle triggers driven by the
+  contextual `EffectClock` service.
+- Added bounded FIFO queues with explicit reject-newest,
+  drop-newest, and drop-oldest overflow decisions.
+- Policy replacement and rejection use `ExitInterrupted` instead
+  of inventing domain failures or a new Exit variant.
+- Added `EffectCommandPolicyEvent`, shared/local policy observers,
+  `EffectCommandPolicyProbe`, and deterministic ManualEffectClock
+  regression coverage.
+- Existing `EffectCommandConcurrency` call sites remain source
+  compatible and translate exactly to the corresponding policies.
+
 ## 0.3.0
 
 - Added `package:better_effect_flutter/testing.dart`, re-exporting the core

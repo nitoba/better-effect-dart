@@ -11,6 +11,7 @@ final class BetterEffectTestApp extends StatelessWidget {
     required this.runtime,
     required this.child,
     this.commandObserver,
+    this.policyObserver,
     this.textDirection = TextDirection.ltr,
     super.key,
   });
@@ -18,6 +19,7 @@ final class BetterEffectTestApp extends StatelessWidget {
   final Runtime runtime;
   final Widget child;
   final EffectCommandObserver? commandObserver;
+  final EffectCommandPolicyObserver? policyObserver;
   final TextDirection textDirection;
 
   @override
@@ -27,6 +29,7 @@ final class BetterEffectTestApp extends StatelessWidget {
       child: BetterEffectProvider.value(
         runtime: runtime,
         observer: commandObserver,
+        policyObserver: policyObserver,
         child: child,
       ),
     );

@@ -17,17 +17,13 @@ typedef BetterEffectBootstrapErrorBuilder =
     );
 
 /// Declaratively starts an application-owned [Runtime] inside Flutter.
-///
-/// Prefer [runBetterEffectApp] when better_effect owns the application root.
-/// Use this widget for add-to-app scenarios, tests, previews, or feature roots
-/// that need asynchronous Runtime startup. The Runtime is removed from the tree
-/// before any lifecycle-triggered close begins.
 final class BetterEffectBootstrap extends StatefulWidget {
   const BetterEffectBootstrap({
     required this.module,
     required this.builder,
     this.backendFactory,
     this.observer,
+    this.policyObserver,
     this.loadingBuilder,
     this.minimumLoadingDuration = Duration.zero,
     this.errorBuilder,
@@ -43,34 +39,16 @@ final class BetterEffectBootstrap extends StatefulWidget {
   }) : _legacyCloseOnApplicationExit = closeRuntimeOnDetach;
 
   final Module module;
-
   final BetterEffectBootstrapBuilder builder;
-
-  /// Creates the backend for each start attempt.
-  ///
-  /// A factory is used instead of a backend instance because a failed/retried
-  /// bootstrap must not reuse an already committed or closed resolver.
   final BetterEffectBackendFactory? backendFactory;
-
   final EffectCommandObserver? observer;
-
+  final EffectCommandPolicyObserver? policyObserver;
   final WidgetBuilder? loadingBuilder;
-
-  /// Minimum amount of time the loading UI remains visible.
-  ///
-  /// The duration starts after the first loading frame is presented.
   final Duration minimumLoadingDuration;
-
   final BetterEffectBootstrapErrorBuilder? errorBuilder;
-
-  /// Changing this value restarts the Runtime even when [module] is identical.
   final Object? restartKey;
-
-  /// Shutdown triggers and cooperative interruption options.
   final BetterEffectLifecyclePolicy lifecyclePolicy;
-
   final bool? _legacyCloseOnApplicationExit;
-
   final void Function(Object error, StackTrace stackTrace)? onRuntimeCloseError;
 
   BetterEffectLifecyclePolicy get _effectiveLifecyclePolicy {
@@ -153,8 +131,15 @@ final class _BetterEffectBootstrapState extends State<BetterEffectBootstrap> {
       return;
     }
 
-    if (!identical(oldWidget.observer, widget.observer) && _runtime != null) {
-      _commands = EffectCommands(_runtime!, observer: widget.observer);
+    final observersChanged =
+        !identical(oldWidget.observer, widget.observer) ||
+        !identical(oldWidget.policyObserver, widget.policyObserver);
+    if (observersChanged && _runtime != null) {
+      _commands = EffectCommands(
+        _runtime!,
+        observer: widget.observer,
+        policyObserver: widget.policyObserver,
+      );
     }
   }
 
@@ -227,7 +212,6 @@ final class _BetterEffectBootstrapState extends State<BetterEffectBootstrap> {
       return null;
     }
 
-    // Wait until Flutter has presented the loading state at least once.
     await WidgetsBinding.instance.endOfFrame;
 
     if (!mounted || generation != _generation) {
@@ -278,6 +262,7 @@ final class _BetterEffectBootstrapState extends State<BetterEffectBootstrap> {
     final module = widget.module;
     final backendFactory = widget.backendFactory;
     final observer = widget.observer;
+    final policyObserver = widget.policyObserver;
 
     final loadingStopwatch = await _prepareLoading(currentGeneration);
 
@@ -297,7 +282,11 @@ final class _BetterEffectBootstrapState extends State<BetterEffectBootstrap> {
 
       setState(() {
         _runtime = runtime;
-        _commands = EffectCommands(runtime, observer: observer);
+        _commands = EffectCommands(
+          runtime,
+          observer: observer,
+          policyObserver: policyObserver,
+        );
         _error = null;
         _stackTrace = null;
       });
@@ -328,21 +317,13 @@ final class _BetterEffectBootstrapState extends State<BetterEffectBootstrap> {
   }
 
   Future<void> _waitMinimumLoadingDuration(Stopwatch? stopwatch) async {
-    if (stopwatch == null) {
-      return;
-    }
+    if (stopwatch == null) return;
 
     final minimum = widget.minimumLoadingDuration;
-
-    if (minimum == Duration.zero) {
-      return;
-    }
+    if (minimum == Duration.zero) return;
 
     final remaining = minimum - stopwatch.elapsed;
-
-    if (remaining.isNegative || remaining == Duration.zero) {
-      return;
-    }
+    if (remaining.isNegative || remaining == Duration.zero) return;
 
     await Future<void>.delayed(remaining);
   }
