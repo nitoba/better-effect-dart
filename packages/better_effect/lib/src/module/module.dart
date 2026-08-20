@@ -12,6 +12,16 @@ final class Module extends IterableBase<Binding> {
     _validateBindings(_bindings);
   }
 
+  /// Mark an application composition root for static graph validation.
+  ///
+  /// At runtime this is exactly the same immutable [Module] as calling the
+  /// default constructor. The explicit factory exists so
+  /// `better_effect_analyzer` can validate the marked root without relying on
+  /// inferred-root heuristics or CLI `--module` configuration.
+  factory Module.complete(Iterable<Binding> bindings) {
+    return Module(bindings);
+  }
+
   /// Create a module by concatenating other modules in declaration order.
   factory Module.merge(Iterable<Module> modules) {
     return Module([for (final module in modules) ...module]);

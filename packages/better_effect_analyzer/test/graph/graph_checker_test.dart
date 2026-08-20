@@ -145,6 +145,68 @@ void main() {
       expect(diagnostic.message, contains("Resource 'RequestResource'"));
       expect(diagnostic.message, contains("requires 'LocalDatabase'"));
     });
+
+    test('validates a marked incomplete root at its declaration', () async {
+      _writeAppSource(
+        app,
+        complete: true,
+        moduleBindings: '''
+  .provide<UserRepository>(UserRepositoryLive.new),
+''',
+      );
+
+      final result = await BetterEffectGraphChecker(app.path).check();
+      final diagnostic = result.diagnostics.singleWhere(
+        (item) => item.code == 'missing_service',
+      );
+
+      expect(diagnostic.message, contains("Complete Module 'appModule'"));
+      expect(diagnostic.message, contains('UserRepository -> Database'));
+      expect(diagnostic.path, 'lib/app.dart');
+    });
+
+    test('validates several independent complete roots', () async {
+      _writeMultipleCompleteRoots(app);
+
+      final result = await BetterEffectGraphChecker(app.path).check();
+      final missing = result.diagnostics
+          .where((item) => item.code == 'missing_service')
+          .toList();
+
+      expect(missing, hasLength(1));
+      expect(missing.single.message, contains("'backgroundModule'"));
+    });
+
+    test('keeps complete roots across overrideWith', () async {
+      _writeCompleteOverrideSource(app, brokenOverride: false);
+
+      final result = await BetterEffectGraphChecker(app.path).check();
+
+      expect(
+        result.diagnostics.map((item) => item.code),
+        isNot(contains('missing_service')),
+      );
+    });
+
+    test('reports an override that breaks a complete root', () async {
+      _writeCompleteOverrideSource(app, brokenOverride: true);
+
+      final result = await BetterEffectGraphChecker(app.path).check();
+      final diagnostic = result.diagnostics.singleWhere(
+        (item) => item.code == 'missing_service',
+      );
+
+      expect(diagnostic.message, contains('UserRepository -> Cache'));
+      expect(diagnostic.message, contains("'appModule'"));
+    });
+
+    test('resolves complete roots composed across files', () async {
+      _writeCrossFileCompleteRoot(app);
+
+      final result = await BetterEffectGraphChecker(app.path).check();
+
+      expect(result.diagnostics, isEmpty);
+    });
   });
 }
 
@@ -254,6 +316,8 @@ final class Services {
 
 final class Module {
   Module(Iterable<Binding> bindings);
+  factory Module.complete(Iterable<Binding> bindings) => Module(bindings);
+  Module overrideWith(Iterable<Binding> overrides) => this;
 }
 final class Runtime {
   Future<Object> runWith(Module module, Object effect) async => Object();
@@ -265,7 +329,11 @@ final class Runtime {
 ''');
 }
 
-void _writeAppSource(Directory app, {required String moduleBindings}) {
+void _writeAppSource(
+  Directory app, {
+  required String moduleBindings,
+  bool complete = false,
+}) {
   final source = File(p.join(app.path, 'lib', 'app.dart'))
     ..parent.createSync(recursive: true);
 
@@ -285,7 +353,7 @@ final class UserRepositoryLive implements UserRepository {
   });
 }
 
-final appModule = Module([
+final appModule = Module${complete ? '.complete' : ''}([
 $moduleBindings
 ]);
 ''');
@@ -418,5 +486,101 @@ Future<void> handle(Runtime runtime) async {
     Effect<int, AppFailure>.result((use) async => 1),
   );
 }
+''');
+}
+
+void _writeMultipleCompleteRoots(Directory app) {
+  final source = File(p.join(app.path, 'lib', 'roots.dart'))
+    ..parent.createSync(recursive: true);
+  source.writeAsStringSync('''
+import 'package:better_effect/better_effect.dart';
+
+abstract interface class Database {}
+final class DatabaseLive implements Database {}
+final class Api {
+  Api(this.database);
+  final Database database;
+}
+final class MissingQueue {}
+final class BackgroundJob {
+  BackgroundJob(this.queue);
+  final MissingQueue queue;
+}
+
+final appModule = Module.complete([
+  .provide<Database>(DatabaseLive.new),
+  .provide<Api>(Api.new),
+]);
+
+final backgroundModule = Module.complete([
+  .provide<BackgroundJob>(BackgroundJob.new),
+]);
+''');
+}
+
+void _writeCompleteOverrideSource(
+  Directory app, {
+  required bool brokenOverride,
+}) {
+  final source = File(p.join(app.path, 'lib', 'override.dart'))
+    ..parent.createSync(recursive: true);
+  final overrideBinding = brokenOverride
+      ? '.provide<UserRepository>(BrokenRepository.new),'
+      : '.provide<UserRepository>(UserRepositoryLive.new),';
+  source.writeAsStringSync('''
+import 'package:better_effect/better_effect.dart';
+
+abstract interface class Database {}
+final class DatabaseLive implements Database {}
+abstract interface class Cache {}
+abstract interface class UserRepository {}
+final class UserRepositoryLive implements UserRepository {
+  UserRepositoryLive(this.database);
+  final Database database;
+}
+final class BrokenRepository implements UserRepository {
+  BrokenRepository(this.cache);
+  final Cache cache;
+}
+
+final baseModule = Module.complete([
+  .provide<Database>(DatabaseLive.new),
+  .provide<UserRepository>(UserRepositoryLive.new),
+]);
+
+final appModule = baseModule.overrideWith([
+  $overrideBinding
+]);
+''');
+}
+
+void _writeCrossFileCompleteRoot(Directory app) {
+  final infrastructure = File(p.join(app.path, 'lib', 'infrastructure.dart'))
+    ..parent.createSync(recursive: true);
+  infrastructure.writeAsStringSync('''
+import 'package:better_effect/better_effect.dart';
+
+abstract interface class Database {}
+final class DatabaseLive implements Database {}
+
+final infrastructureModule = Module([
+  .provide<Database>(DatabaseLive.new),
+]);
+''');
+
+  final application = File(p.join(app.path, 'lib', 'application.dart'));
+  application.writeAsStringSync('''
+import 'package:better_effect/better_effect.dart';
+import 'infrastructure.dart';
+
+final class Repository {
+  Repository(this.database);
+  final Database database;
+}
+
+final appModule = Module.complete([
+  ...infrastructureModule,
+  .provide<Repository>(Repository.new),
+]);
 ''');
 }

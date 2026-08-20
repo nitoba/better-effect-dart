@@ -24,6 +24,8 @@
 - Added service resolution paths, execution-scoped Module event propagation,
   Flutter Command label verification, observer-ordering tests, and a standalone
   no-observer overhead benchmark.
+- Added `Module.complete` as a runtime-neutral marker for application composition
+  roots validated by `better_effect_analyzer`.
 
 ## 0.2.0
 
