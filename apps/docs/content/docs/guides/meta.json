@@ -3,6 +3,7 @@
   "pages": [
     "index",
     "effects",
+    "collection-composition",
     "resources-and-lifetimes",
     "execution-scoped-modules",
     "observability",

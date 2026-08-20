@@ -165,6 +165,61 @@ final class Effect<A extends Object, E extends Object> {
     });
   }
 
+  /// Compose a homogeneous collection of Effects.
+  ///
+  /// The collection is traversed only when the returned Effect runs. By
+  /// default, one item is physically active at a time. Set [concurrency] to a
+  /// positive finite limit for bounded parallelism, or use [allUnbounded] when
+  /// intentionally starting every item at once.
+  static Effect<List<T>, F> all<T extends Object, F extends Object>(
+    Iterable<Effect<T, F>> effects, {
+    int concurrency = 1,
+  }) {
+    return _effectForEach<Effect<T, F>, T, F>(
+      effects,
+      (effect) => effect,
+      concurrency: concurrency,
+    );
+  }
+
+  /// Compose a homogeneous collection and start every item without a worker
+  /// limit.
+  ///
+  /// Unbounded concurrency is deliberately a separate API so a missing limit
+  /// cannot accidentally create an unbounded workload.
+  static Effect<List<T>, F> allUnbounded<T extends Object, F extends Object>(
+    Iterable<Effect<T, F>> effects,
+  ) {
+    return _effectForEachUnbounded<Effect<T, F>, T, F>(
+      effects,
+      (effect) => effect,
+    );
+  }
+
+  /// Transform every input into an Effect and collect successful values in
+  /// input order.
+  ///
+  /// Scheduling is FIFO and [concurrency] must be positive. After a typed
+  /// failure or defect is observed, no new items start. Already-started work is
+  /// awaited so its resources remain owned by the enclosing execution.
+  static Effect<List<B>, F> forEach<I, B extends Object, F extends Object>(
+    Iterable<I> inputs,
+    Effect<B, F> Function(I input) transform, {
+    int concurrency = 1,
+  }) {
+    return _effectForEach<I, B, F>(inputs, transform, concurrency: concurrency);
+  }
+
+  /// Transform every input and start all resulting Effects without a worker
+  /// limit.
+  static Effect<List<B>, F> forEachUnbounded<
+    I,
+    B extends Object,
+    F extends Object
+  >(Iterable<I> inputs, Effect<B, F> Function(I input) transform) {
+    return _effectForEachUnbounded<I, B, F>(inputs, transform);
+  }
+
   Future<ResultDart<A, E>> _run(_RuntimeContext context) {
     return _runner(context);
   }
