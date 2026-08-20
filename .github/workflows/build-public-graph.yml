@@ -1,0 +1,81 @@
+name: Build public graph integration
+
+on:
+  push:
+    branches:
+      - automation/public-graph-build
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout staging branch
+        uses: actions/checkout@v4
+        with:
+          ref: automation/public-graph-build
+
+      - name: Integrate public graph with checker
+        run: |
+          python3 .github/scripts/complete_public_graph.py
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('packages/better_effect_analyzer/lib/src/graph/graph_checker.dart')
+          source = path.read_text()
+          if "import 'dart:collection';" not in source:
+              source = source.replace(
+                  "import 'dart:convert';\n",
+                  "import 'dart:collection';\nimport 'dart:convert';\n",
+                  1,
+              )
+          path.write_text(source)
+          PY
+
+      - name: Set up Dart
+        uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+
+      - name: Resolve dependencies
+        working-directory: packages/better_effect_analyzer
+        run: dart pub get
+
+      - name: Format public graph implementation
+        run: |
+          dart format \
+            packages/better_effect_analyzer/bin/better_effect_analyzer.dart \
+            packages/better_effect_analyzer/lib/better_effect_analyzer.dart \
+            packages/better_effect_analyzer/lib/src/graph/graph_checker.dart \
+            packages/better_effect_analyzer/lib/src/graph/graph_model.dart \
+            packages/better_effect_analyzer/lib/src/graph/graph_queries.dart \
+            packages/better_effect_analyzer/lib/src/graph/graph_renderers.dart \
+            packages/better_effect_analyzer/test/graph/public_graph_test.dart
+
+      - name: Analyze
+        working-directory: packages/better_effect_analyzer
+        run: dart analyze --fatal-infos
+
+      - name: Run public graph tests
+        working-directory: packages/better_effect_analyzer
+        run: dart test test/graph/public_graph_test.dart --reporter expanded
+
+      - name: Run analyzer suite
+        working-directory: packages/better_effect_analyzer
+        run: dart test
+
+      - name: Validate publication
+        working-directory: packages/better_effect_analyzer
+        run: dart pub publish --dry-run
+
+      - name: Commit integrated product files
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add packages/better_effect_analyzer
+          git commit -m "feat(graph): integrate public graph and inspection CLI"
+          git push origin HEAD:automation/public-graph-build
