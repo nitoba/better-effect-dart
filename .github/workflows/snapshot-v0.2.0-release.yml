@@ -1,0 +1,98 @@
+name: Snapshot v0.2.0 release
+
+on:
+  push:
+    branches:
+      - release/verify-v0.2.0
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  snapshot:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPOSITORY: nitoba/better-effect-dart
+
+    steps:
+      - name: Checkout verification branch
+        uses: actions/checkout@v4
+        with:
+          ref: release/verify-v0.2.0
+
+      - name: Capture workflow and pub.dev state
+        run: |
+          python3 - <<'PY'
+          import json
+          import subprocess
+          import urllib.request
+          from pathlib import Path
+
+          releases = [
+              ('better_effect', 'publish-better-effect.yml', 'better_effect-v0.2.0'),
+              ('better_effect_analyzer', 'publish-better-effect-analyzer.yml', 'better_effect_analyzer-v0.2.0'),
+              ('better_effect_flutter', 'publish-better-effect-flutter.yml', 'better_effect_flutter-v0.2.0'),
+          ]
+
+          def gh_runs(workflow):
+              output = subprocess.check_output(
+                  [
+                      'gh', 'run', 'list',
+                      '--repo', 'nitoba/better-effect-dart',
+                      '--workflow', workflow,
+                      '--limit', '20',
+                      '--json',
+                      'databaseId,status,conclusion,headBranch,event,url,createdAt,updatedAt',
+                  ],
+                  text=True,
+              )
+              return json.loads(output)
+
+          packages = []
+          for package, workflow, tag in releases:
+              runs = gh_runs(workflow)
+              matching = [
+                  run for run in runs
+                  if run.get('headBranch') == tag
+                  or run.get('event') == 'workflow_dispatch'
+              ]
+
+              latest = matching[0] if matching else None
+              pub_latest = None
+              pub_error = None
+              try:
+                  with urllib.request.urlopen(
+                      f'https://pub.dev/api/packages/{package}',
+                      timeout=20,
+                  ) as response:
+                      pub_latest = json.load(response)['latest']['version']
+              except Exception as error:
+                  pub_error = str(error)
+
+              packages.append(
+                  {
+                      'package': package,
+                      'tag': tag,
+                      'workflow': workflow,
+                      'run': latest,
+                      'pubLatest': pub_latest,
+                      'pubError': pub_error,
+                  }
+              )
+
+          Path('.release-v0.2.0-snapshot.json').write_text(
+              json.dumps({'packages': packages}, indent=2, sort_keys=True) + '\n'
+          )
+          print(json.dumps({'packages': packages}, indent=2, sort_keys=True))
+          PY
+
+      - name: Commit snapshot
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add .release-v0.2.0-snapshot.json
+          git commit -m "chore(release): snapshot v0.2.0 publication"
+          git push origin HEAD:release/verify-v0.2.0
