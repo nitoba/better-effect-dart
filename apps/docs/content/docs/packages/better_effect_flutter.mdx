@@ -112,3 +112,16 @@ Veja o [guia de Flutter MVVM](../guides/flutter-mvvm) e o exemplo incluído em
 | ViewModel usa `ChangeNotifier` próprio | `EffectCommandOwner` |
 | View só renderiza estado | `EffectCommandBuilder` |
 | View faz navegação/snackbar/analytics | `EffectCommandListener` |
+
+
+## Seleção tipada e rebuild filtering
+
+`EffectCommandSelector` projeta o estado em um valor fortemente tipado
+e usa `==` ou igualdade customizada para reconstruir somente quando esse
+valor muda. A variante `.snapshot` observa também pending, fila e
+triggers. `EffectCommandBuilder.buildWhen` filtra transições quando a
+View ainda precisa do estado completo.
+
+Veja [Seletores de Command](../guides/command-selectors) para exemplos,
+semântica de igualdade, troca de Command, child reuse e integração com
+listeners one-shot.

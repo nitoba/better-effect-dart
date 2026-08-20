@@ -1,0 +1,140 @@
+---
+title: Seletores de Command
+description: Rebuilds tipados e locais sem consumir revisões one-shot ou alterar o estado do Command
+---
+
+`EffectCommandBuilder` continua sendo a opção direta para renderizar o
+estado completo. Use seleção quando um fragmento depende apenas de uma
+projeção, como loading, dados visíveis, falha atual ou tamanho da fila.
+
+## Selecione um valor tipado
+
+```dart
+EffectCommandSelector<User, AppFailure, bool>(
+  command: viewModel.loadUser,
+  selector: (state) => state.isRunning,
+  child: const UserContent(),
+  builder: (context, isRunning, child) {
+    return LoadingOverlay(
+      visible: isRunning,
+      child: child!,
+    );
+  },
+)
+```
+
+O subtree reconstrói somente quando o `bool` muda. O estado do Command
+continua intacto e disponível para outros builders e listeners.
+
+## Igualdade padrão e customizada
+
+A comparação padrão usa `==`. Records, enums, bools, valores nullable e
+objetos imutáveis normalmente funcionam sem configuração adicional.
+
+Para listas ou objetos sensíveis à identidade:
+
+```dart
+EffectCommandSelector<List<User>, AppFailure, List<User>?>(
+  command: viewModel.loadUsers,
+  selector: (state) => state.dataOrNull,
+  equals: (previous, current) {
+    return listEquals(previous, current);
+  },
+  builder: ...,
+)
+```
+
+A igualdade controla somente rebuild. Ela não descarta estados,
+outcomes ou eventos do listener.
+
+## Pending, fila e triggers
+
+Esses valores podem mudar sem uma nova revisão visual. Selecione o
+snapshot somente-leitura:
+
+```dart
+EffectCommandSelector.snapshot(
+  command: viewModel.save,
+  selector: (snapshot) => (
+    pending: snapshot.pendingCount,
+    queued: snapshot.queuedCount,
+    trigger: snapshot.triggerPendingCount,
+  ),
+  builder: (context, counts, child) {
+    return QueueStatus(counts: counts);
+  },
+)
+```
+
+`EffectCommandSnapshot` também expõe `state`, `lastExit`, `policy`,
+`isRunning`, `dataOrNull`, `errorOrNull` e `isTerminal`.
+
+## Filtre o builder existente
+
+```dart
+EffectCommandBuilder<User, AppFailure>(
+  command: viewModel.loadUser,
+  buildWhen: (previous, current) {
+    return previous.dataOrNull != current.dataOrNull;
+  },
+  builder: (context, state, child) {
+    return UserContent(user: state.dataOrNull);
+  },
+)
+```
+
+`buildWhen` recebe transições consecutivas. Quando retorna `false`, o
+subtree mantém o último estado aceito, mas a transição recusada vira a
+base da próxima comparação.
+
+`EffectCommandConsumer` aceita o mesmo `buildWhen`, enquanto
+`listenWhen` continua controlando apenas efeitos imperativos.
+
+## Troca de Command e child
+
+Ao receber outra instância de Command, selector e builder removem a
+inscrição antiga, observam a nova e renderizam seu valor atual. O
+`child` é reutilizado como nos builders padrão do Flutter.
+
+## Listener continua one-shot
+
+```dart
+EffectCommandListener(
+  command: viewModel.loadUser,
+  onSuccess: (context, user) => openProfile(context, user),
+  child: EffectCommandSelector(
+    command: viewModel.loadUser,
+    selector: (state) => state.isRunning,
+    builder: ...,
+  ),
+)
+```
+
+Seletores não consomem `revision`. Mudanças apenas no snapshot não
+notificam o listener, então navegação, SnackBar, dialog e analytics não
+repetem.
+
+## Isole o menor subtree útil
+
+Coloque o selector ao redor do fragmento que realmente depende do valor:
+
+```dart
+Stack(
+  children: [
+    const UserContent(),
+    EffectCommandSelector<User, AppFailure, bool>(
+      command: viewModel.loadUser,
+      selector: (state) => state.isRunning,
+      builder: (context, running, child) {
+        return Visibility(
+          visible: running,
+          child: const LoadingOverlay(),
+        );
+      },
+    ),
+  ],
+)
+```
+
+Isso reduz rebuilds locais sem transformar o package em framework de
+estado, signals ou memoização geral.

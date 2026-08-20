@@ -105,7 +105,27 @@ Não reduza isso a `isLoading` + `error != null`: o estado também informa se
 houve sucesso anterior, se a falha era esperada, se houve defeito ou se o
 Command perdeu a posse da execução.
 
-## Bootstrap e ownership
+
+    ## Isole rebuilds com seleção tipada
+
+    Quando um fragmento depende apenas de loading ou dados visíveis, evite
+    reconstruir a tela inteira:
+
+    ```dart
+    EffectCommandSelector<Session, AuthFailure, bool>(
+      command: viewModel.login,
+      selector: (state) => state.isRunning,
+      builder: (context, running, child) {
+        return LoginProgress(visible: running);
+      },
+    )
+    ```
+
+    Para queue, debounce e throttle, `EffectCommandSelector.snapshot`
+    expõe `pendingCount`, `queuedCount` e `triggerPendingCount` sem criar
+    revisões de UI artificiais. Consulte [Seletores de Command](./command-selectors).
+
+    ## Bootstrap e ownership
 
 Na raiz da aplicação, `runBetterEffectApp` cria um Runtime de longa duração:
 

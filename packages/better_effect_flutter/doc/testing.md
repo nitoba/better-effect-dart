@@ -195,3 +195,31 @@ The policy probe records started, queued, replaced, rejected,
 dropped, trigger, cancellation, and defect decisions. No input or
 Effect value is included in an event. Release every gate, pending
 clock window, and physical execution before closing the Runtime.
+
+
+## Test selector rebuild boundaries
+
+Use an ordinary build counter for selected values and keep timing
+deterministic with `TestGate` or `ManualEffectClock`:
+
+```dart
+final selected = <bool>[];
+
+await tester.pumpWidget(
+  EffectCommandSelector<User, UserFailure, bool>(
+    command: command,
+    selector: (state) => state.isRunning,
+    builder: (context, value, child) {
+      selected.add(value);
+      return child!;
+    },
+    child: const UserContent(),
+  ),
+);
+```
+
+Test custom equality with new collection instances containing the same
+values. For queue policies, use `EffectCommandSelector.snapshot` and
+assert `pendingCount`/`queuedCount` while gates control physical work.
+Listener assertions remain separate because selectors never consume
+state revisions.

@@ -92,3 +92,21 @@ side effect.
 `BetterEffectScope` stores a Runtime for a Flutter subtree, but Widgets should
 normally know only their ViewModel. Business dependencies remain inside Effects
 through `use<T>()` rather than a global injector.
+
+
+## Selection and rendering boundaries
+
+`EffectCommandBuilder` remains the full-state rendering boundary and
+can optionally apply `buildWhen(previous, current)`. A rejected build
+transition does not consume the state; it becomes the baseline for the
+next comparison while the subtree keeps rendering its last accepted
+state.
+
+`EffectCommandSelector` projects either `EffectCommandState` or the
+read-only `EffectCommandSnapshot` into a strongly typed value. Snapshot
+notifications include queue and pending-count changes that are not
+presentation-state revisions. They do not notify `EffectCommandListener`
+and therefore cannot repeat navigation, SnackBars, or analytics.
+
+Selector equality is local to rendering. It never mutates Command state,
+changes caller outcomes, or changes execution ownership.
