@@ -86,13 +86,14 @@ void main() {
       final pending = probe.nextWhere(
         (state) => state is EffectCommandFailure<int, ProbeFailure>,
       );
-
-      probe.dispose();
-
-      await expectLater(
+      final expectation = expectLater(
         pending,
         throwsA(isA<EffectCommandProbeDisposedException>()),
       );
+
+      probe.dispose();
+
+      await expectation;
       expect(command.isDisposed, isFalse);
 
       command.dispose();
