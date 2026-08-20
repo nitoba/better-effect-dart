@@ -1,4 +1,4 @@
-## Unreleased
+## 0.3.0
 
 - Added `Runtime.executeWith`, `runWith`, and `runExitWith` for temporary
   execution-scoped Modules.
