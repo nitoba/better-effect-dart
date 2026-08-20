@@ -1,21 +1,22 @@
 ---
 title: better_effect
-description: Effects, dependency injection, scopes e recursos para Dart
+description: Effects, dependency injection, scopes, recursos e observabilidade para Dart
 ---
 
 ## Para que serve
 
-`better_effect` é a camada de runtime. Ele combina:
+`better_effect` é a camada de runtime da família. Ele combina:
 
-- `Effect<A, E>` para operações assíncronas com falha tipada;
-- `Module` para declarar bindings e compor dependências;
-- `Runtime` e `Scope` para controlar o ciclo de vida;
-- `EffectLocal` para contexto por execução.
+- `Effect<A, E>` para operações lazy com falha tipada;
+- `Module` para declarar serviços, lifetimes e resources;
+- `Runtime` e `Scope` para controlar execução e ciclo de vida;
+- `EffectExecution` para interrupção cooperativa e ownership físico;
+- `EffectLocal` para contexto por execução;
+- `RuntimeObserver` para logs, métricas, tracing e diagnóstico operacional.
 
-O core foi construído para ser a menor unidade útil: não importa Flutter, não
-impõe um state manager e não cria um service locator global. Ele pode viver em
-packages de domínio, CLI, backend Dart e na camada compartilhada de uma app
-Flutter.
+O core é Dart-only. Ele não importa Flutter, não impõe um state manager e não
+cria um service locator global. Pode ser usado em packages de domínio, CLI,
+backend Dart, workers e na camada compartilhada de uma aplicação Flutter.
 
 ## Primeiro Effect
 
@@ -40,41 +41,137 @@ final class GreetingApiLive implements GreetingApi {
   Future<String> fetchGreeting() async => 'Olá, better_effect';
 }
 
-Effect<String, AppFailure> loadGreeting() => Effect.result((use) async {
-  final api = use<GreetingApi>();
-  return api.fetchGreeting();
-});
+Effect<String, AppFailure> loadGreeting() =>
+    Effect.result((use) async {
+      final api = use<GreetingApi>();
+      return use.tryAsync(
+        api.fetchGreeting,
+        onError: (error, stack) => NetworkFailure(error.toString()),
+      );
+    });
 ```
 
-Na prática, funções factory com `Effect.result`, `Effect.succeed` e
-`Effect.fail` costumam ser suficientes. O importante é manter a operação
-descrita separada da execução.
+Construir o Effect não executa I/O. A operação começa somente quando um Runtime
+a executa.
 
-## Module e lifetimes
+## Module e Runtime
 
 ```dart
 final module = Module([
-  Binding.singleton<GreetingApi>(GreetingApiLive.new),
+  .provide<GreetingApi>(GreetingApiLive.new),
 ]);
 
-final runtime = await Runtime.start(module);
-final result = await runtime.run(loadGreeting());
-await runtime.close();
+final runtime = await module.start();
+
+try {
+  final result = await runtime.run(loadGreeting());
+  // Trate Success ou Failure.
+} finally {
+  await runtime.close();
+}
 ```
 
-Para uma operação única, prefira `module.run(effect)`: ele inicia o Runtime,
-executa o Effect e fecha os recursos automaticamente. Use `Runtime.start` para
-uma app de longa duração, worker ou subtree Flutter que executará muitas
-operações.
+Para uma operação única, use `module.run(effect)` ou `module.runExit(effect)`.
+Essas APIs iniciam e fecham o Runtime automaticamente.
 
-Use `factory` para objetos por resolução, `singleton` para uma instância criada
-na inicialização e `lazySingleton` quando a instância só deve nascer no
-primeiro uso.
+## Resources com owner explícito
+
+Um resource do Module vive durante o Runtime:
+
+```dart
+final module = Module([
+  .resource<ApiClient>(
+    acquire: (_) => ApiClient.connect(),
+    release: (client, exit) => client.close(),
+  ),
+]);
+```
+
+Um resource adquirido com `use.acquire` vive durante uma execução:
+
+```dart
+final file = await use.acquire(
+  Effect.tryAsync(
+    TemporaryFile.create,
+    onError: TemporaryFileFailure.from,
+  ),
+  release: (file, exit) => file.delete(),
+);
+```
+
+O callback de release recebe o `Exit` responsável pelo fechamento.
+
+## Contexto e resources por execução
+
+Use um Module local quando uma operação precisa de request context, tenant,
+transaction ou overrides temporários:
+
+```dart
+final requestModule = Module([
+  .instance<RequestContext>(requestContext),
+  .resource<Transaction>(
+    acquire: (services) {
+      return services<Database>().beginTransaction();
+    },
+    release: (transaction, exit) => transaction.close(exit),
+  ),
+]);
+
+final exit = await runtime.runExitWith(
+  requestModule,
+  handleRequest,
+  executionLabel: 'http.request',
+);
+```
+
+O ambiente local resolve seus próprios bindings primeiro e usa o Runtime raiz
+como fallback. Nada é registrado globalmente.
+
+## Execuções gerenciadas
+
+```dart
+final execution = runtime.execute(
+  synchronizeOrders(),
+  label: 'orders.synchronize',
+);
+
+execution.interrupt(reason: 'screen-disposed');
+final exit = await execution.exit;
+```
+
+A interrupção é cooperativa. O `ExitInterrupted` pode ser publicado antes da
+conclusão física, mas o Runtime continua sendo owner do Scope e dos resources
+até o Future terminar.
+
+## Observabilidade
+
+```dart
+final runtime = await module.start(
+  observers: [AppObserver()],
+);
+```
+
+Observers podem acompanhar execuções, resolução de dependências, aquisição,
+release, interrupção e falhas de cleanup. As falhas do próprio observer são
+isoladas e não alteram o resultado dos Effects.
+
+Use `EffectLocal.metadata` para request IDs, trace IDs e outros campos seguros:
+
+```dart
+const requestId = EffectLocal<String>.metadata(
+  'unknown',
+  name: 'request.id',
+);
+
+final program = loadUser.withLocals([
+  requestId.bind('req-123'),
+]);
+```
 
 ## Composição de produção, teste e preview
 
-Modules são descrições imutáveis. O mesmo grafo de produção pode receber
-overrides sem alterar a implementação:
+Modules são descrições imutáveis. O mesmo grafo pode receber overrides sem
+alterar a implementação:
 
 ```dart
 final production = Module([
@@ -88,10 +185,14 @@ final test = production.overrideWith([
 ]);
 ```
 
-Esse padrão é mais seguro que trocar singletons globais: o override pertence ao
-Runtime/Effect escolhido e não altera outras execuções concorrentes.
+Esse padrão evita estado global e permite Runtimes concorrentes com ambientes
+diferentes.
 
 ## Próximos passos
 
-- [Efeitos e tratamento de falhas](../guides/effects)
+- [Efeitos e falhas tipadas](../guides/effects)
+- [Recursos e ciclo de vida](../guides/resources-and-lifetimes)
+- [Modules por execução](../guides/execution-scoped-modules)
+- [Observabilidade](../guides/observability)
+- [Testando Effects e Commands](../guides/testing)
 - [API do package no pub.dev](https://pub.dev/packages/better_effect)

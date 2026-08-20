@@ -1,15 +1,18 @@
 ---
 title: Guias
-description: Padrões práticos para Effects, Flutter, lifetimes, testes e CI
+description: Padrões práticos para Effects, lifecycle, observabilidade, Flutter, testes e CI
 ---
 
 Depois do primeiro fluxo, estes guias ajudam a tomar decisões que normalmente
 causam bugs em produção: tratamento de falhas, concorrência, ownership de
-recursos, testes e validação arquitetural.
+recursos, contexto por execução, observabilidade, testes e validação
+arquitetural.
 
 <Cards>
-  <Card title="Efeitos e falhas tipadas" href="/docs/guides/effects" description="Um login completo com API, cache, composição e distinção entre falha e defeito." />
+  <Card title="Efeitos e falhas tipadas" href="/docs/guides/effects" description="Modele operações, componha Results e preserve a diferença entre falha esperada e defeito." />
   <Card title="Recursos e ciclo de vida" href="/docs/guides/resources-and-lifetimes" description="Escolha entre Module.resource, use.acquire e os lifetimes de bindings." />
+  <Card title="Modules por execução" href="/docs/guides/execution-scoped-modules" description="Forneça request context, transactions e overrides temporários sem alterar o Runtime raiz." />
+  <Card title="Observabilidade" href="/docs/guides/observability" description="Conecte execuções, dependências e recursos a logs, métricas e tracing." />
   <Card title="Flutter MVVM" href="/docs/guides/flutter-mvvm" description="Commands, estados observáveis, ownership e políticas de concorrência." />
   <Card title="Testando Effects e Commands" href="/docs/guides/testing" description="Substitua I/O, verifique Exit e teste a borda Flutter sem rede." />
   <Card title="Diagnósticos e CI" href="/docs/guides/diagnostics" description="Combine plugin do editor e graph checker para impedir regressões." />

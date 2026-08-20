@@ -1,0 +1,277 @@
+---
+title: Observabilidade
+description: Conecte execuções, dependências e recursos a logs, métricas e tracing sem alterar os resultados dos Effects
+---
+
+Observabilidade responde perguntas que aparecem depois que a aplicação já está
+rodando:
+
+- qual operação falhou?
+- quanto tempo ela levou?
+- qual dependência não pôde ser resolvida?
+- um recurso demorou para abrir ou fechar?
+- a execução terminou normalmente, foi interrompida ou continuou fisicamente
+  depois de um timeout?
+
+O `better_effect` expõe essas informações por meio de `RuntimeObserver`. O
+observer não é um logger nem um SDK de tracing. Ele é uma borda neutra que você
+pode adaptar para a ferramenta usada pela aplicação.
+
+## Configure observers no Runtime
+
+```dart
+final class AppObserver extends RuntimeObserver {
+  @override
+  void onExecutionEnd(ExecutionEndEvent event) {
+    logger.info(
+      'effect.completed',
+      fields: {
+        'executionId': event.context.executionId,
+        'operation': event.context.executionLabel,
+        'durationMs': event.duration.inMilliseconds,
+        'outcome': event.outcome.runtimeType.toString(),
+      },
+    );
+  }
+}
+
+final runtime = await appModule.start(
+  observers: [AppObserver()],
+);
+```
+
+As mesmas opções estão disponíveis em `Module.run` e `Module.runExit` para
+execuções de curta duração.
+
+Use vários observers quando cada integração tiver uma responsabilidade clara:
+
+```dart
+final runtime = await appModule.start(
+  observers: [
+    StructuredLogObserver(logger),
+    MetricsObserver(metrics),
+    TraceObserver(tracer),
+  ],
+);
+```
+
+## Quais eventos estão disponíveis?
+
+| Callback | Quando usar |
+| --- | --- |
+| `onExecutionStart` | Iniciar uma medição ou span de uma operação. |
+| `onExecutionEnd` | Registrar duração e resultado final da execução física. |
+| `onServiceResolve` | Diagnosticar resolução de dependências e caminhos ausentes. |
+| `onServiceAcquire` | Medir a abertura de recursos do Module ou do Effect. |
+| `onResourceRelease` | Medir cleanup e relacioná-lo ao `Exit` que fechou o Scope. |
+| `onInterruption` | Distinguir cancelamento do owner e shutdown do Runtime. |
+| `onCleanupFailure` | Alertar sobre falhas de fechamento sem apagar o resultado principal. |
+
+Uma execução normalmente produz esta sequência:
+
+```text
+ExecutionStart
+  ├── ServiceResolve*
+  ├── ServiceAcquire*
+  ├── Interruption?
+  ├── ResourceRelease*
+  ├── CleanupFailure?
+  └── ExecutionEnd
+```
+
+`ExecutionEnd` representa o fim físico. Se um timeout ou cancelamento já tiver
+entregado um resultado lógico ao caller, o evento final ainda aguarda o Future
+subjacente e o cleanup dos recursos.
+
+## Nomeie operações, não classes
+
+Uma label estável torna logs e métricas mais fáceis de agregar:
+
+```dart
+final exit = await runtime.runExit(
+  loadUser(userId),
+  executionLabel: 'users.load',
+);
+```
+
+Para uma execução gerenciada:
+
+```dart
+final execution = runtime.execute(
+  synchronizeOrders(),
+  label: 'orders.synchronize',
+);
+```
+
+Prefira nomes de operação como `users.load`, `checkout.submit` ou
+`sync.pull-changes`. Evite incluir IDs na label; IDs pertencem à metadata.
+
+No Flutter, o `debugLabel` de um `EffectCommand` é encaminhado ao Runtime:
+
+```dart
+final load = command<List<User>, UserFailure>(
+  loadUsers,
+  debugLabel: 'users.load',
+);
+```
+
+Assim, a transição observada na UI e os eventos do Runtime podem ser
+correlacionados pelo mesmo nome.
+
+## Adicione contexto com `EffectLocal.metadata`
+
+Use metadata para valores que variam por execução, como request ID, trace ID,
+job ID ou tenant:
+
+```dart
+const requestId = EffectLocal<String>.metadata(
+  'unknown-request',
+  name: 'request.id',
+);
+
+const traceId = EffectLocal<String>.metadata(
+  'unknown-trace',
+  name: 'trace.id',
+);
+
+final program = loadUser(userId).withLocals([
+  requestId.bind('req-123'),
+  traceId.bind('trace-456'),
+]);
+```
+
+O mapa recebido pelo observer é imutável:
+
+```dart
+@override
+void onExecutionEnd(ExecutionEndEvent event) {
+  final request = event.context.localMetadata['request.id'];
+  final trace = event.context.localMetadata['trace.id'];
+  // Envie os campos para seu logger ou tracer.
+}
+```
+
+Um `EffectLocal` comum não é exposto automaticamente:
+
+```dart
+const session = EffectLocal<Session?>(null, name: 'session');
+```
+
+Escolha `EffectLocal.metadata` apenas para valores seguros para diagnóstico.
+Não publique tokens, senhas, documentos pessoais, payloads inteiros ou objetos
+mutáveis de domínio.
+
+## Diagnostique dependências ausentes
+
+`ServiceResolveEvent` informa o tipo solicitado, o nome lógico de um
+`ServiceKey`, a duração e o erro de resolução. Quando o backend conhece a cadeia
+de construtores, o evento preserva um caminho legível:
+
+```text
+CheckoutController → CheckoutRepository → Database
+```
+
+Isso ajuda a localizar o ponto em que o composition root deixou de fornecer uma
+capacidade, sem transformar o observer em acesso ao container.
+
+## Observe aquisição e cleanup
+
+Recursos do Runtime, de um Module por execução e de `use.acquire` passam pelos
+mesmos eventos:
+
+```dart
+@override
+void onResourceRelease(ResourceReleaseEvent event) {
+  metrics.observe(
+    'resource.release.duration',
+    event.duration,
+    tags: {
+      'resource': event.serviceType.toString(),
+      'source': event.source.name,
+      'outcome': event.outcome.runtimeType.toString(),
+    },
+  );
+}
+```
+
+O observer recebe informações sobre o recurso, não a instância do recurso. Isso
+mantém ownership e encapsulamento dentro do Runtime.
+
+Falhas de cleanup aparecem em `onCleanupFailure`. Elas seguem a semântica do
+Runtime: uma falha tipada ou interrupção principal continua preservada, enquanto
+o problema operacional pode ser enviado para logs e alertas.
+
+## Diferencie interrupção do owner e shutdown
+
+Uma tela ou Command pode interromper sua própria execução:
+
+```dart
+execution.interrupt(reason: 'screen-disposed');
+```
+
+Nesse caso, `InterruptionSource.executionOwner` indica que o owner publicou
+`ExitInterrupted`.
+
+No shutdown, o Runtime pode apenas solicitar cancelamento cooperativo após um
+período de graça:
+
+```dart
+await runtime.close(
+  gracePeriod: const Duration(seconds: 2),
+  interruptAfterGracePeriod: true,
+);
+```
+
+Esse evento usa `InterruptionSource.runtimeShutdown`. O código ainda precisa
+observar `use.cancellation` ou cruzar `throwIfCancelled()` para parar
+cooperativamente.
+
+## Não bloqueie a execução com o exporter
+
+Callbacks são síncronos para preservar ordem e previsibilidade. Não faça rede,
+disco ou flush remoto diretamente dentro deles. Enfileire o evento:
+
+```dart
+final class QueueingObserver extends RuntimeObserver {
+  QueueingObserver(this.queue);
+
+  final TelemetryQueue queue;
+
+  @override
+  void onExecutionEnd(ExecutionEndEvent event) {
+    queue.add(event);
+  }
+}
+```
+
+O worker da fila pode transformar os eventos em spans, métricas ou logs fora do
+caminho crítico do Effect.
+
+## Falhas do observer são isoladas
+
+Um observer não deve poder alterar o resultado da aplicação. Se um callback
+lançar, os próximos observers continuam sendo chamados. Use
+`observerErrorHandler` para registrar falhas da própria instrumentação:
+
+```dart
+final runtime = await appModule.start(
+  observers: [AppObserver()],
+  observerErrorHandler: (failure) {
+    fallbackLogger.error(
+      'runtime observer failed',
+      error: failure.error,
+      stackTrace: failure.stackTrace,
+    );
+  },
+);
+```
+
+Até o handler é best-effort. Sucesso, falha tipada, defeito, interrupção e
+cleanup continuam com a mesma semântica, exista observabilidade ou não.
+
+## Próximos passos
+
+- [Recursos e ciclo de vida](./resources-and-lifetimes)
+- [Modules por execução](./execution-scoped-modules)
+- [Flutter MVVM](./flutter-mvvm)
+- [Diagnósticos e CI](./diagnostics)
