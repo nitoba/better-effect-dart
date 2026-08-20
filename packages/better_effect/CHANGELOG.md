@@ -12,6 +12,18 @@
   publishing an execution defect.
 - Added the optional `ResolverBackendOverlayFactory` capability for custom
   backends; `AutoInjectorBackend` supports isolated overlays by default.
+- Added synchronous, SDK-neutral `RuntimeObserver` callbacks for execution,
+  service resolution, resource acquisition/release, interruption, and cleanup
+  failures.
+- Runtime observer failures are isolated and can be reported through a
+  best-effort `RuntimeObserverErrorHandler` without changing Effect outcomes.
+- Execution events now expose labels, physical duration, opaque Scope identity,
+  logical outcomes, and selected local metadata.
+- Added `EffectLocal.metadata`, typed `EffectLocal.bind`, and `Effect.withLocals`
+  for heterogeneous batch context composition.
+- Added service resolution paths, execution-scoped Module event propagation,
+  Flutter Command label verification, observer-ordering tests, and a standalone
+  no-observer overhead benchmark.
 
 ## 0.2.0
 

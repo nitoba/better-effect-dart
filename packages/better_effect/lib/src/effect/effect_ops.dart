@@ -8,7 +8,7 @@ extension EffectTransformOps<A extends Object, E extends Object>
     return Effect<B, E>._((context) async {
       final result = await _run(context);
       return result.map<B>(transform);
-    });
+    }, _localBindings);
   }
 
   /// Sequence another Effect that uses this Effect's successful value.
@@ -20,7 +20,7 @@ extension EffectTransformOps<A extends Object, E extends Object>
         (value) => next(value)._run(context),
         (error) async => Failure<B, E>(error),
       );
-    });
+    }, _localBindings);
   }
 
   /// Transform the typed failure.
@@ -28,7 +28,7 @@ extension EffectTransformOps<A extends Object, E extends Object>
     return Effect<A, F>._((context) async {
       final result = await _run(context);
       return result.mapError<F>(transform);
-    });
+    }, _localBindings);
   }
 
   /// Recover from every typed failure with another Effect.
@@ -42,7 +42,7 @@ extension EffectTransformOps<A extends Object, E extends Object>
         (value) async => Success<A, F>(value),
         (error) => recover(error)._run(context),
       );
-    });
+    }, _localBindings);
   }
 
   /// Run an observation after success without changing the value.
@@ -54,7 +54,7 @@ extension EffectTransformOps<A extends Object, E extends Object>
         await inspect(value);
         return Success<A, E>(value);
       }, (error) async => Failure<A, E>(error));
-    });
+    }, _localBindings);
   }
 
   /// Run an observation after a typed failure without changing the failure.
@@ -69,7 +69,7 @@ extension EffectTransformOps<A extends Object, E extends Object>
           return Failure<A, E>(error);
         },
       );
-    });
+    }, _localBindings);
   }
 
   /// Discard the success value while preserving the typed failure.
@@ -81,14 +81,39 @@ extension EffectTransformOps<A extends Object, E extends Object>
   Effect<A, E> provide<T extends Object>(T instance, {ServiceKey<T>? key}) {
     return Effect<A, E>._((context) {
       return _run(context._withOverride<T>(instance, key: key));
-    });
+    }, _localBindings);
   }
 
   /// Run this Effect with a locally overridden [EffectLocal] value.
   Effect<A, E> withLocal<T extends Object>(EffectLocal<T> local, T value) {
-    return Effect<A, E>._((context) {
-      return _run(context._withLocal(local, value));
-    });
+    return withLocals(<EffectLocalBinding>[local.bind(value)]);
+  }
+
+  /// Apply a heterogeneous batch of typed [EffectLocal] values.
+  ///
+  /// ```dart
+  /// program.withLocals([
+  ///   requestId.bind('req-123'),
+  ///   traceId.bind('trace-456'),
+  /// ]);
+  /// ```
+  ///
+  /// Bindings later in this iterable replace earlier bindings for the same
+  /// local. Existing inner `withLocal`/`withLocals` wrappers remain closer to the
+  /// original Effect and therefore keep their existing nesting precedence.
+  Effect<A, E> withLocals(Iterable<EffectLocalBinding> bindings) {
+    final values = List<EffectLocalBinding>.unmodifiable(bindings);
+    if (values.isEmpty) {
+      return this;
+    }
+
+    return Effect<A, E>._(
+      (context) => _run(context._withLocals(values)),
+      List<EffectLocalBinding>.unmodifiable(<EffectLocalBinding>[
+        ...values,
+        ..._localBindings,
+      ]),
+    );
   }
 
   /// Fail with [onTimeout] when this Effect does not finish in time.
@@ -107,7 +132,7 @@ extension EffectTransformOps<A extends Object, E extends Object>
           return Failure<A, E>(onTimeout());
         },
       );
-    });
+    }, _localBindings);
   }
 
   /// Turn the typed failure channel into a successful Result value.
@@ -115,7 +140,7 @@ extension EffectTransformOps<A extends Object, E extends Object>
     return Effect<ResultDart<A, E>, Never>._((context) async {
       final result = await _run(context);
       return Success<ResultDart<A, E>, Never>(result);
-    });
+    }, _localBindings);
   }
 }
 

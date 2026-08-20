@@ -52,12 +52,16 @@ final class Module extends IterableBase<Binding> {
     Effect<A, E> effect, {
     ResolverBackend? backend,
     CleanupFailureObserver? cleanupFailureObserver,
+    Iterable<RuntimeObserver> observers = const <RuntimeObserver>[],
+    RuntimeObserverErrorHandler? observerErrorHandler,
     String? executionLabel,
   }) async {
     final exit = await runExit(
       effect,
       backend: backend,
       cleanupFailureObserver: cleanupFailureObserver,
+      observers: observers,
+      observerErrorHandler: observerErrorHandler,
       executionLabel: executionLabel,
     );
     return _resultFromExit(exit);
@@ -68,6 +72,8 @@ final class Module extends IterableBase<Binding> {
     Effect<A, E> effect, {
     ResolverBackend? backend,
     CleanupFailureObserver? cleanupFailureObserver,
+    Iterable<RuntimeObserver> observers = const <RuntimeObserver>[],
+    RuntimeObserverErrorHandler? observerErrorHandler,
     String? executionLabel,
   }) async {
     Runtime? runtime;
@@ -76,6 +82,8 @@ final class Module extends IterableBase<Binding> {
       runtime = await start(
         backend: backend,
         cleanupFailureObserver: cleanupFailureObserver,
+        observers: observers,
+        observerErrorHandler: observerErrorHandler,
       );
       final exit = await runtime.runExit(
         effect,
@@ -121,11 +129,15 @@ final class Module extends IterableBase<Binding> {
   Future<Runtime> start({
     ResolverBackend? backend,
     CleanupFailureObserver? cleanupFailureObserver,
+    Iterable<RuntimeObserver> observers = const <RuntimeObserver>[],
+    RuntimeObserverErrorHandler? observerErrorHandler,
   }) {
     return Runtime.start(
       this,
       backend: backend,
       cleanupFailureObserver: cleanupFailureObserver,
+      observers: observers,
+      observerErrorHandler: observerErrorHandler,
     );
   }
 

@@ -112,6 +112,12 @@ final class _EffectContext<E extends Object> implements EffectContext<E> {
     Effect<R, F> acquisition, {
     required ResourceRelease<R> release,
   }) {
-    return _runtime.scope._acquire(() => unwrap(acquisition), release);
+    return _runtime._acquireResource<R>(
+      operation: () => unwrap(acquisition),
+      release: release,
+      serviceType: R,
+      serviceKey: null,
+      source: ResourceAcquisitionSource.effect,
+    );
   }
 }

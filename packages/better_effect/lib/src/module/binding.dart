@@ -189,9 +189,12 @@ final class _ResourceBinding<T extends Object> extends Binding {
     late T value;
 
     try {
-      value = await context.scope._acquire(
-        () => Future<T>.sync(() => acquire(Services._(context))),
-        release,
+      value = await context._acquireResource<T>(
+        operation: () => Future<T>.sync(() => acquire(Services._(context))),
+        release: release,
+        serviceType: T,
+        serviceKey: key?.name,
+        source: ResourceAcquisitionSource.module,
       );
     } catch (error, stackTrace) {
       Error.throwWithStackTrace(

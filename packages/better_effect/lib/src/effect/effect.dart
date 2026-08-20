@@ -20,9 +20,20 @@ typedef _EffectRunner<A extends Object, E extends Object> =
 /// });
 /// ```
 final class Effect<A extends Object, E extends Object> {
-  const Effect._(this._runner);
+  const Effect._(
+    this._runner, [
+    this._localBindings = const <EffectLocalBinding>[],
+  ]);
 
   final _EffectRunner<A, E> _runner;
+
+  /// Statically visible top-level bindings used for execution start/end
+  /// metadata. The actual local values remain applied by the Effect wrappers.
+  final List<EffectLocalBinding> _localBindings;
+
+  Map<String, Object> _initialObserverMetadata() {
+    return _effectLocalBindingMetadata(_localBindings);
+  }
 
   /// Build an Effect using ordinary `async`/`await` syntax.
   ///
