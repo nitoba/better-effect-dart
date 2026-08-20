@@ -1,215 +1,279 @@
 ---
 title: Testando Effects e Commands
-description: Testes determinísticos para falhas, recursos, concorrência e UI
+description: Testes determinísticos para resultados, recursos, concorrência, UI e backends customizados
 ---
 
-O teste deve exercitar decisões, não acidentes de infraestrutura. Como o
-`Effect` é lazy e o `Module` aceita overrides, é possível manter o fluxo de
-produção e trocar somente a folha que fala com rede, banco ou relógio.
-
-Os trechos abaixo partem dos tipos da [primeira feature](../getting-started/first-feature)
-(`Order`, `OrderFailure`, `OrdersApi`, `loadOrders` e `appModule`). Em um projeto
-real, eles ficam nos imports do teste; as fixtures usadas aqui são deliberadamente
-pequenas para manter a pergunta de cada teste visível.
-
-## Teste de uma operação de domínio
-
-Comece pelo contrato da operação:
+Os packages oferecem entrypoints separados para código de teste:
 
 ```dart
-import 'package:test/test.dart';
+import 'package:better_effect/testing.dart';
+```
 
-test('retorna pedidos da implementação configurada', () async {
-  final module = appModule.overrideWith([
-    .instance<OrdersApi>(FakeOrdersApi.success([
-      const Order(id: 'ord-1', total: 42),
-    ])),
-  ]);
+```dart
+import 'package:better_effect_flutter/testing.dart';
+```
 
-  final result = await module.run(loadOrders());
+Eles reexportam a API normal e acrescentam harnesses, gates determinísticos,
+assertions tipadas e probes. O código de produção continua importando os
+entrypoints principais.
 
-  expect(result.isSuccess(), isTrue);
-  expect(result.getOrNull()?.single.total, 42);
+## Um Runtime que pertence ao teste
+
+`TestRuntime` inicia um Runtime real e conecta um
+`RecordingRuntimeObserver`:
+
+```dart
+test('carrega o usuário configurado', () async {
+  final harness = await TestRuntime.start(
+    appModule.overrideWith([
+      .instance<UserRepository>(FakeUserRepository.success(user)),
+    ]),
+    registerCleanup: (cleanup) => addTearDown(cleanup),
+  );
+
+  final exit = await harness.runExit(
+    loadUser(user.id),
+    executionLabel: 'users.load',
+  );
+
+  expect(exit, isExitSuccess<User, UserFailure>(user));
+  harness.assertNoActiveExecutions();
 });
 ```
 
-O `Module.run` cria um Runtime temporário, executa o Effect e fecha os
-recursos. Para um teste de uma operação, isso evita boilerplate de startup e
-shutdown.
+O registrar de cleanup permite integrar o harness ao runner sem fazer o package
+depender de `package:test`. Também é possível usar `try/finally` ou
+`TestRuntime.use` para uma única operação.
 
-## Verifique cada canal de resultado
-
-Uma falha esperada não deve virar defeito, e um defeito não deve ser aceito
-como uma falha de produto. `runExit` torna a distinção verificável:
+## Verifique o canal correto do Exit
 
 ```dart
-import 'dart:async';
+expect(exit, isExitSuccess<User, UserFailure>());
+expect(exit, isExitFailure<User, UserFailure>(isA<UserNotFound>()));
+expect(exit, isExitDefect<User, UserFailure>(isA<StateError>()));
+expect(exit, isExitInterrupted<User, UserFailure>());
+```
 
-import 'package:better_effect/better_effect.dart';
-import 'package:better_effect_flutter/better_effect_flutter.dart';
-import 'package:test/test.dart';
+Quando o payload é necessário, use os extractors tipados:
 
-final class FakeOrdersApi implements OrdersApi {
-  const FakeOrdersApi(this._load);
+```dart
+final user = expectExitSuccess(exit);
+final failure = expectExitFailure(exit);
+final (:defect, :stackTrace) = expectExitDefect(exit);
+expectExitInterrupted(exit);
+```
 
-  factory FakeOrdersApi.success(List<Order> orders) {
-    return FakeOrdersApi(() async => orders);
-  }
+Isso impede que uma falha esperada seja aceita como defeito ou que um bug passe
+como erro de domínio.
 
-  factory FakeOrdersApi.throwing(Object error) {
-    return FakeOrdersApi(() => Future<List<Order>>.error(error));
-  }
+## Controle concorrência sem sleeps
 
-  final Future<List<Order>> Function() _load;
+`TestGate<T>` libera uma operação com um valor conhecido:
 
-  @override
-  Future<List<Order>> getOrders() => _load();
+```dart
+final gate = TestGate<User>();
+
+final execution = harness.execute(
+  Effect.result((_) => gate.future),
+);
+
+// Faça assertions enquanto a execução está ativa.
+gate.complete(user);
+expect(await execution.exit, isExitSuccess<User, UserFailure>(user));
+```
+
+`TestSignal` serve para boundaries sem valor:
+
+```dart
+final started = TestSignal();
+final continueWork = TestSignal();
+
+final execution = harness.execute(
+  Effect.result((_) async {
+    started.signal();
+    await continueWork.wait;
+    return unit;
+  }),
+);
+
+await started.wait;
+continueWork.signal();
+```
+
+Use esses primitives para testar timeout, cancel-first, completion-first,
+`latest`, fila e shutdown sem depender da velocidade da máquina.
+
+## Verifique ordem de recursos
+
+`TestEventRecorder<T>` mantém uma sequência imutável para aquisição e cleanup:
+
+```dart
+final events = TestEventRecorder<String>();
+
+events.record('acquire:database');
+events.record('acquire:transaction');
+events.record('release:transaction');
+events.record('release:database');
+
+events.expectEvents([
+  'acquire:database',
+  'acquire:transaction',
+  'release:transaction',
+  'release:database',
+]);
+```
+
+O Runtime recorder também permite aguardar eventos operacionais:
+
+```dart
+final ended = harness.observer.next<ExecutionEndEvent>(
+  where: (event) => event.context.executionLabel == 'users.load',
+);
+```
+
+`harness.assertNoActiveExecutions()` detecta Futures que ainda pertencem ao
+Runtime depois que o teste observou um timeout ou uma interrupção lógica.
+
+## Teste Commands sem montar widgets
+
+```dart
+final probe = EffectCommandProbe<User, UserFailure>(viewModel.loadUser);
+addTearDown(probe.dispose);
+
+final running = probe.waitFor<
+  EffectCommandRunning<User, UserFailure>
+>();
+final success = probe.waitFor<
+  EffectCommandSuccess<User, UserFailure>
+>();
+
+await viewModel.loadUser.execute(userId);
+
+expect(await running, isA<EffectCommandRunning<User, UserFailure>>());
+expect((await success).value.id, userId);
+```
+
+Para o estado atual, use extractors:
+
+```dart
+final user = expectCommandSuccess(command.value);
+final failure = expectCommandFailure(command.value);
+final (:defect, :stackTrace) = expectCommandDefect(command.value);
+
+expectCommandIdle(command.value);
+expectCommandRunning(command.value);
+expectCommandInterrupted(command.value);
+```
+
+Uma sequência completa pode ser verificada por tipo:
+
+```dart
+probe.expectStateTypes([
+  EffectCommandIdle<User, UserFailure>,
+  EffectCommandRunning<User, UserFailure>,
+  EffectCommandSuccess<User, UserFailure>,
+]);
+```
+
+## Teste listeners one-shot
+
+Use `EffectCommandListenerProbe` com o callback `onChanged`:
+
+```dart
+final listener = EffectCommandListenerProbe<User, UserFailure>();
+
+EffectCommandListener(
+  command: command,
+  onChanged: listener.call,
+  child: const UserScreen(),
+);
+```
+
+Depois da interação:
+
+```dart
+expect(
+  listener.deliveriesOf<EffectCommandFailure<User, UserFailure>>(),
+  hasLength(1),
+);
+listener.expectUniqueRevisions();
+```
+
+Isso é útil para SnackBars, dialogs, navegação e analytics que não podem receber
+a mesma revisão duas vezes.
+
+## Widget tests com ownership externo
+
+`BetterEffectTestApp` monta um `BetterEffectProvider.value` e adiciona
+`Directionality`:
+
+```dart
+await tester.pumpWidget(
+  BetterEffectTestApp(
+    runtime: harness.runtime,
+    child: const UserScreen(),
+  ),
+);
+```
+
+A árvore não fecha o Runtime. O teste continua owner por meio do `TestRuntime`.
+Adicione um `MaterialApp` como child quando a tela precisar de tema,
+localizations, navegação ou Scaffold.
+
+## Valide um ResolverBackend customizado
+
+Autores de backends podem executar o contrato compartilhado:
+
+```dart
+test('MyBackend respeita o contrato', () async {
+  await runResolverBackendContractTests(
+    createBackend: MyBackend.new,
+  );
+});
+```
+
+A suíte verifica lifetimes, keys, constructor injection, missing/circular
+dependencies, duplicidade, idempotência, registration depois do commit, startup
+parcial, fechamento, execução depois de close e overlays quando suportados.
+
+Para inspecionar todos os resultados:
+
+```dart
+final report = await inspectResolverBackendContract(
+  createBackend: MyBackend.new,
+);
+
+for (final failure in report.failures) {
+  print('${failure.scenario.name}: ${failure.error}');
 }
-
-test('mapeia uma exceção de rede para a falha do domínio', () async {
-  final module = appModule.overrideWith([
-    .instance<OrdersApi>(FakeOrdersApi.throwing(Exception('offline'))),
-  ]);
-
-  final exit = await module.runExit(loadOrders());
-
-  expect(exit, isA<ExitFailure<List<Order>, OrderFailure>>());
-  expect(
-    (exit as ExitFailure<List<Order>, OrderFailure>).error,
-    isA<OrdersOffline>(),
-  );
-});
-
-test('preserva um bug como defeito', () async {
-  final module = appModule.overrideWith([
-    .instance<OrdersApi>(FakeOrdersApi.throwing(StateError('invalid state'))),
-  ]);
-
-  final exit = await module.runExit(loadOrders());
-
-  expect(exit, isA<ExitDefect<List<Order>, OrderFailure>>());
-});
 ```
 
-O primeiro caso alimenta a experiência de retry. O segundo deve alimentar
-logs, alertas ou um teste de regressão — não uma mensagem genérica de offline.
+Containers que oferecem callbacks nativos de disposal podem fornecer uma
+`ResolverBackendDisposalProbeFactory`. Sem essa probe, somente esse cenário
+opcional aparece como skipped; falhas obrigatórias continuam falhando o report.
 
-## Teste de um Command sem widget
+## Test doubles
 
-Commands são `ValueListenable`s, mas não exigem montar uma árvore Flutter para
-validar concorrência e resultado:
+O toolkit não implementa um framework de mocks. Prefira fakes pequenos e
+`Module.overrideWith`:
 
 ```dart
-import 'dart:async';
-
-import 'package:better_effect_flutter/better_effect_flutter.dart';
-import 'package:test/test.dart';
-
-test('drop não cria duas leituras concorrentes', () async {
-  final runtime = await appModule.start();
-  final commands = EffectCommands(runtime);
-  final gate = Completer<void>();
-  var calls = 0;
-
-  final command = commands.withInput<String, Order, OrderFailure>(
-    (_) => Effect<Order, OrderFailure>.result((_) async {
-      calls++;
-      await gate.future;
-      return const Order(id: 'ord-1', total: 42);
-    }),
-    concurrency: EffectCommandConcurrency.drop,
-  );
-
-  final first = command.execute('first');
-  final second = command.execute('second');
-  expect(calls, 1);
-
-  gate.complete();
-  await Future.wait([first, second]);
-
-  expect(command.value, isA<EffectCommandSuccess<Order, OrderFailure>>());
-
-  command.dispose();
-  await runtime.close();
-});
+final testModule = productionModule.overrideWith([
+  .instance<Clock>(FakeClock.fixed(now)),
+  .instance<UserRepository>(FakeUserRepository(users)),
+]);
 ```
 
-Use a mesma técnica para `latest` (a resposta velha não pode vencer) e
-`queue` (as intenções precisam ser processadas na ordem). O teste descreve a
-decisão de produto sem `pumpAndSettle` ou sleeps longos.
+Assim o teste usa o mesmo Effect, Runtime, Scope e fluxo de cleanup da aplicação
+real, substituindo apenas a borda de I/O.
 
-## Widget test: teste a borda, não o container inteiro
+## Checklist
 
-Quando a pergunta é visual — loading, conteúdo anterior, mensagem de falha —
-monte a tela com um Runtime de teste:
-
-```dart
-import 'package:flutter/material.dart';
-import 'package:flutter_test/flutter_test.dart';
-import 'package:better_effect/better_effect.dart';
-import 'package:better_effect_flutter/better_effect_flutter.dart';
-
-final class OfflineOrderRepository implements OrderRepository {
-  const OfflineOrderRepository();
-
-  @override
-  Effect<List<Order>, OrderFailure> loadOrders() {
-    return Effect.fail(OrdersOffline(Exception('offline')));
-  }
-}
-
-testWidgets('mostra retry para falha esperada', (tester) async {
-  final runtime = await appModule.overrideWith([
-    .instance<OrderRepository>(const OfflineOrderRepository()),
-  ]).start();
-
-  await tester.pumpWidget(
-    BetterEffectProvider.value(
-      runtime: runtime,
-      child: const MaterialApp(home: OrdersScreen()),
-    ),
-  );
-
-  await tester.tap(find.text('Atualizar'));
-  await tester.pumpAndSettle();
-
-  expect(find.text('Tentar novamente'), findsOneWidget);
-
-  await tester.pumpWidget(const SizedBox.shrink());
-  await runtime.close();
-});
-```
-
-`BetterEffectProvider.value` deixa o teste ser o owner do Runtime. Isso evita
-que a árvore feche uma instância que outro fixture ainda usa. Em testes com
-`BetterEffectBootstrap`, deixe o widget possuir o Runtime e aguarde a tela de
-startup antes de interagir.
-
-## Analyzer como teste arquitetural
-
-Testes de comportamento não detectam todo erro de composição. Inclua as duas
-escalas no CI:
-
-```bash
-dart analyze --fatal-infos
-dart run better_effect_analyzer --format machine
-flutter test
-```
-
-O plugin encontra Effects descartados e operações de contexto sem `await` no
-arquivo atual. O graph checker verifica bindings ausentes, ciclos, roots e
-providers incompatíveis. Um projeto pode passar em um e falhar no outro; isso
-é informação útil, não duplicação.
-
-## Checklist de um teste forte
-
-- substitua a borda de I/O com `.instance` ou `overrideWith`;
-- teste pelo menos uma falha esperada e um defeito relevante;
-- verifique a política de concorrência escolhida pelo produto;
-- mantenha o owner do Runtime explícito no final do teste;
-- prefira `runExit` quando cleanup e defeitos fizerem parte da pergunta;
-- rode analyzer, graph checker e testes de widget em etapas separadas.
-
-O resultado é um conjunto de testes rápidos que valida o mesmo desenho usado
-em produção, em vez de uma segunda implementação especial para o ambiente de
-teste.
+- registre ou feche explicitamente todo `TestRuntime`;
+- libere gates antes de encerrar o teste;
+- use `assertNoActiveExecutions` para ownership físico;
+- teste sucesso, falha tipada, defeito e interrupção quando forem relevantes;
+- valide a política de concorrência escolhida pelo produto;
+- dispose probes, ViewModels e Commands nos boundaries corretos;
+- rode o TCK quando publicar um backend customizado;
+- mantenha analyzer, graph checker, unit tests e widget tests como gates separados.

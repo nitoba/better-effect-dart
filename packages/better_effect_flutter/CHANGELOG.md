@@ -1,3 +1,11 @@
+## Unreleased
+
+- Added `package:better_effect_flutter/testing.dart`, re-exporting the core
+  testing toolkit with Flutter-specific Command and widget helpers.
+- Added `EffectCommandProbe` waits and history assertions, typed sealed-state
+  extractors, `EffectCommandListenerProbe` for one-shot delivery, and
+  `BetterEffectTestApp` for externally owned Runtime widget tests.
+
 ## 0.2.0
 
 - Effect Commands now start work through core `EffectExecution` handles.
