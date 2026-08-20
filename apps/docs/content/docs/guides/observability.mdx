@@ -65,6 +65,7 @@ final runtime = await appModule.start(
 | `onServiceAcquire` | Medir a abertura de recursos do Module ou do Effect. |
 | `onResourceRelease` | Medir cleanup e relacioná-lo ao `Exit` que fechou o Scope. |
 | `onInterruption` | Distinguir cancelamento do owner e shutdown do Runtime. |
+| `onRetry` | Observar tentativas, delays planejados e por que uma policy continuou ou parou. |
 | `onCleanupFailure` | Alertar sobre falhas de fechamento sem apagar o resultado principal. |
 
 Uma execução normalmente produz esta sequência:
@@ -73,6 +74,7 @@ Uma execução normalmente produz esta sequência:
 ExecutionStart
   ├── ServiceResolve*
   ├── ServiceAcquire*
+  ├── Retry*
   ├── Interruption?
   ├── ResourceRelease*
   ├── CleanupFailure?
@@ -200,6 +202,29 @@ mantém ownership e encapsulamento dentro do Runtime.
 Falhas de cleanup aparecem em `onCleanupFailure`. Elas seguem a semântica do
 Runtime: uma falha tipada ou interrupção principal continua preservada, enquanto
 o problema operacional pode ser enviado para logs e alertas.
+
+## Observe decisões de retry
+
+`RetryEvent` informa a tentativa one-based, a policy, a falha tipada
+anterior, o delay planejado e a decisão final. O evento reutiliza o ID,
+a label e a metadata da execução gerenciada:
+
+```dart
+@override
+void onRetry(RetryEvent event) {
+  metrics.increment(
+    'effect.retry',
+    tags: {
+      'operation': event.context.executionLabel,
+      'decision': event.decision.name,
+    },
+  );
+}
+```
+
+Falhas de cleanup continuam aparecendo em `onCleanupFailure`; um
+`RetryDecision.cleanupFailed` explica que o loop não iniciou outra
+tentativa. Falhas do observer não afetam a policy.
 
 ## Diferencie interrupção do owner e shutdown
 

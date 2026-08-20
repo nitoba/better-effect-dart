@@ -253,6 +253,7 @@ final class Runtime {
       overrides: const <_ServiceIdentity, Object>{},
       locals: const <Object, Object>{},
       observation: rootObservation,
+      cleanupFailureReporter: null,
     );
 
     try {
@@ -370,6 +371,14 @@ final class Runtime {
       execution.scope,
       cancellation: execution.cancellation,
       observation: observation,
+      cleanupFailureReporter: (error, outcome, scope) {
+        return _reportCleanupFailure(
+          error,
+          outcome,
+          execution: execution,
+          scope: scope,
+        );
+      },
     );
 
     if (observation != null) {
@@ -537,6 +546,7 @@ final class Runtime {
     ScopeReleaseException error,
     Exit<Object, Object> outcome, {
     required _RuntimeExecution execution,
+    Scope? scope,
   }) {
     final diagnostic = CleanupFailureDiagnostic(
       outcome: outcome,
@@ -544,7 +554,11 @@ final class Runtime {
       executionId: execution.id,
       executionLabel: execution.label,
     );
-    _emitCleanupFailure(execution.observation, execution.scope, diagnostic);
+    _emitCleanupFailure(
+      execution.observation,
+      scope ?? execution.scope,
+      diagnostic,
+    );
     return _notifyCleanupFailureBestEffort(_cleanupFailureObserver, diagnostic);
   }
 

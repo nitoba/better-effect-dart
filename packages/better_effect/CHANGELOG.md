@@ -1,5 +1,16 @@
 ## Unreleased
 
+- Added typed-failure `Effect.retry` with `none`, fixed, linear, and
+  exponential policies, optional full jitter, maximum delays, and
+  explicit attempt-count semantics.
+- Each retry attempt owns a child Scope that closes before policy
+  evaluation or delay; cleanup defects retain Runtime precedence and
+  prevent a broken typed-failure attempt from retrying.
+- Added optional `EffectClock` and `EffectRandom` contracts with host,
+  seeded, and manual test implementations; no service is installed
+  implicitly.
+- Added observable `RetryEvent` decisions, deterministic tests, package
+  and website guides, and a retry benchmark.
 - Added lazy `Effect.all` and `Effect.forEach` collection composition with
   sequential-by-default and positive bounded concurrency.
 - Added explicit `Effect.allUnbounded` and `Effect.forEachUnbounded` APIs so

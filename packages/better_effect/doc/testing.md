@@ -122,6 +122,29 @@ events.expectEvents([
 
 These primitives make concurrency deterministic without wall-clock sleeps.
 
+## Advance retry time manually
+
+`ManualEffectClock` completes sleeps only when the test advances time:
+
+```dart
+final clock = ManualEffectClock();
+final harness = await TestRuntime.start(
+  Module([.instance<EffectClock>(clock)]),
+  registerCleanup: (cleanup) => addTearDown(cleanup),
+);
+
+final scheduled = harness.observer.next<RetryEvent>(
+  where: (event) => event.decision == RetryDecision.retryScheduled,
+);
+final execution = harness.execute(request.retry(policy));
+
+expect((await scheduled).plannedDelay, const Duration(seconds: 1));
+await clock.advance(const Duration(seconds: 1));
+```
+
+This verifies retry without wall-clock sleeps. Owner interruption also
+removes a pending manual sleep, so cancellation tests stay deterministic.
+
 ## Runtime events and leak assertions
 
 The attached observer exposes immutable event snapshots and typed waits:

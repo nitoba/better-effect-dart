@@ -1,0 +1,306 @@
+---
+title: Retry determinístico
+description: Repita somente falhas tipadas com delays substituíveis, jitter e um Scope por tentativa
+---
+
+`Effect.retry` executa novamente um Effect lazy depois de falhas tipadas
+elegíveis. Sucesso encerra o fluxo, defects não são repetidos e interrupção
+impede novas tentativas.
+
+```dart
+final request = loadRemoteData().retry(
+  RetryPolicy.exponential(
+    maxAttempts: 4,
+    initialDelay: const Duration(milliseconds: 200),
+    maxDelay: const Duration(seconds: 3),
+  ),
+  whileError: (error) => error is TemporaryNetworkFailure,
+);
+```
+
+`maxAttempts` inclui a execução inicial. No exemplo acima, o Effect pode rodar no
+máximo quatro vezes.
+
+## Instale tempo e aleatoriedade explicitamente
+
+Retry com delay usa `EffectClock`. Jitter usa `EffectRandom`. Nenhum dos dois é
+registrado automaticamente:
+
+```dart
+final module = Module([
+  .instance<EffectClock>(const SystemEffectClock()),
+  .instance<EffectRandom>(SystemEffectRandom()),
+  .provide<RemoteRepository>(RemoteRepositoryLive.new),
+]);
+```
+
+Os contratos são pequenos e Dart-only:
+
+```dart
+abstract interface class EffectClock {
+  DateTime now();
+
+  Future<void> sleep(
+    Duration duration,
+    CancellationSignal cancellation,
+  );
+}
+```
+
+```dart
+abstract interface class EffectRandom {
+  double nextDouble();
+}
+```
+
+Uma tentativa com delay zero não resolve `EffectClock`. Uma policy sem jitter não
+resolve `EffectRandom`. Aplicações que não usam retry temporizado continuam sem
+custo, registro ou dependência implícita.
+
+## Policies disponíveis
+
+### Nenhuma repetição
+
+```dart
+final once = operation.retry(
+  RetryPolicy.none(),
+);
+```
+
+### Delay fixo
+
+```dart
+final fixed = operation.retry(
+  RetryPolicy.fixed(
+    maxAttempts: 3,
+    delay: const Duration(milliseconds: 250),
+  ),
+);
+```
+
+### Crescimento linear
+
+A primeira falha espera `initialDelay`. As falhas seguintes somam `increment`:
+
+```dart
+final linear = operation.retry(
+  RetryPolicy.linear(
+    maxAttempts: 5,
+    initialDelay: const Duration(milliseconds: 100),
+    increment: const Duration(milliseconds: 200),
+    maxDelay: const Duration(seconds: 1),
+  ),
+);
+```
+
+Sem o cap, a sequência seria `100 ms`, `300 ms`, `500 ms`, `700 ms`.
+
+### Crescimento exponencial
+
+```dart
+final exponential = operation.retry(
+  RetryPolicy.exponential(
+    maxAttempts: 5,
+    initialDelay: const Duration(milliseconds: 100),
+    factor: 2,
+    maxDelay: const Duration(seconds: 2),
+  ),
+);
+```
+
+A sequência começa em `100 ms`, `200 ms`, `400 ms`, `800 ms`.
+
+As policies validam contagem de tentativas, durações negativas, fator inválido e
+overflow. Use `maxDelay` quando um crescimento longo deve ser limitado em vez de
+rejeitado.
+
+## Full jitter
+
+Ative `jitter` para escolher um delay uniforme entre zero e o valor calculado:
+
+```dart
+final resilient = operation.retry(
+  RetryPolicy.exponential(
+    maxAttempts: 5,
+    initialDelay: const Duration(milliseconds: 200),
+    maxDelay: const Duration(seconds: 5),
+    jitter: true,
+  ),
+);
+```
+
+A policy chama `EffectRandom.nextDouble()` somente quando o delay calculado é
+positivo. O valor precisa ser finito e pertencer ao intervalo `[0, 1)`.
+
+Para testes reproduzíveis, use `SeededEffectRandom`:
+
+```dart
+final testModule = productionModule.overrideWith([
+  .instance<EffectRandom>(SeededEffectRandom(42)),
+]);
+```
+
+## Escolha quais falhas podem repetir
+
+`whileError` restringe a repetição sem alterar o tipo de erro:
+
+```dart
+final result = fetchUser().retry(
+  RetryPolicy.fixed(
+    maxAttempts: 3,
+    delay: const Duration(milliseconds: 200),
+  ),
+  whileError: (failure) => switch (failure) {
+    NetworkUnavailable() => true,
+    _ => false,
+  },
+);
+```
+
+Uma falha rejeitada retorna imediatamente. Se o predicate lançar, o objeto
+lançado continua sendo defect.
+
+## Um Scope por tentativa
+
+Cada tentativa recebe um Scope filho da execução gerenciada:
+
+```dart
+final effect = Effect<Response, RequestFailure>.result((use) async {
+  final transaction = await use.acquire(
+    beginTransaction(),
+    release: (transaction, exit) => transaction.close(exit),
+  );
+
+  return sendRequest(transaction);
+}).retry(policy);
+```
+
+O Scope fecha antes da avaliação da policy, do sleep ou da próxima tentativa.
+Assim, resources locais nunca se sobrepõem acidentalmente entre tentativas.
+Resources pertencentes ao Module do Runtime continuam compartilhados.
+
+O cleanup mantém a semântica já usada pelo Runtime:
+
+- cleanup depois de sucesso transforma a tentativa em defect;
+- cleanup depois de defect produz `CompositeDefect`;
+- cleanup depois de falha tipada ou interrupção preserva o resultado principal e
+  emite `CleanupFailureDiagnostic`;
+- uma falha tipada cuja tentativa teve cleanup quebrado não é repetida.
+
+Esse último ponto impede tratar um problema de release como se fosse apenas mais
+uma falha transitória do domínio.
+
+## Interrupção
+
+Tentativas e delays observam o `CancellationSignal` da execução:
+
+```dart
+final execution = runtime.execute(
+  request.retry(policy),
+  label: 'remote.request',
+);
+
+execution.interrupt(reason: 'screen-disposed');
+final exit = await execution.exit;
+```
+
+A interrupção do owner publica `ExitInterrupted` imediatamente. Trabalho físico
+não cancelável e cleanup ainda podem permanecer pertencendo ao Runtime. Nenhuma
+nova tentativa começa depois que o cancelamento é observado.
+
+`SystemEffectClock.sleep` compete o timer com `cancellation.whenCancelled`.
+Clocks customizados devem preservar esse contrato cooperativo.
+
+## Observabilidade das decisões
+
+`RuntimeObserver.onRetry` recebe um `RetryEvent`:
+
+```dart
+final class AppObserver extends RuntimeObserver {
+  @override
+  void onRetry(RetryEvent event) {
+    logger.info('retry', {
+      'execution.id': event.context.executionId,
+      'execution.label': event.context.executionLabel,
+      'attempt': event.attempt,
+      'decision': event.decision.name,
+      'delay.ms': event.plannedDelay?.inMilliseconds,
+    });
+  }
+}
+```
+
+`RetryDecision` diferencia:
+
+- `retryScheduled`;
+- `succeeded`;
+- `policyStopped`;
+- `failureRejected`;
+- `interrupted`;
+- `defect`;
+- `cleanupFailed`.
+
+Observers continuam síncronos e best-effort. Uma falha do próprio observer não
+altera a policy nem o resultado do Effect.
+
+## Policies customizadas
+
+Implemente `RetryPolicy<E>` quando os modelos prontos não bastarem:
+
+```dart
+final class TwoAttemptPolicy implements RetryPolicy<AppFailure> {
+  const TwoAttemptPolicy();
+
+  @override
+  Duration? nextDelay(RetryContext<AppFailure> context) {
+    return context.attempt < 2 ? Duration.zero : null;
+  }
+}
+```
+
+`RetryContext.attempt` é one-based e representa a tentativa que acabou de
+falhar. `RetryContext.error` contém essa falha. Uma policy customizada pode usar
+`context.nextRandom()`; nesse caso, `EffectRandom` é resolvido de forma lazy.
+
+A policy deve retornar `null` ou uma `Duration` não negativa. Retornos inválidos
+e exceptions continuam defects.
+
+## Teste sem esperar o relógio real
+
+O entrypoint de testes fornece `ManualEffectClock`:
+
+```dart
+import 'package:better_effect/testing.dart';
+
+final clock = ManualEffectClock();
+final harness = await TestRuntime.start(
+  Module([
+    .instance<EffectClock>(clock),
+  ]),
+  registerCleanup: (cleanup) => addTearDown(cleanup),
+);
+
+final scheduled = harness.observer.next<RetryEvent>(
+  where: (event) => event.decision == RetryDecision.retryScheduled,
+);
+final execution = harness.execute(request.retry(policy));
+
+final event = await scheduled;
+expect(event.plannedDelay, const Duration(seconds: 1));
+
+await clock.advance(const Duration(seconds: 1));
+expect(
+  await execution.exit,
+  isExitSuccess<Response, RequestFailure>(),
+);
+```
+
+O clock manual não espera tempo de parede. Sleeps terminam somente quando o teste
+avança o relógio, enquanto uma interrupção remove imediatamente o sleep pendente.
+
+## Próximos passos
+
+- [Coleções e concorrência limitada](./collection-composition)
+- [Recursos e ciclo de vida](./resources-and-lifetimes)
+- [Observabilidade](./observability)
+- [Testando Effects e Commands](./testing)
