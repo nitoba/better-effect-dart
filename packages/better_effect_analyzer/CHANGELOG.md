@@ -17,6 +17,15 @@
   ownership.
 - The graph CLI now emits the same lifecycle codes and messages as the IDE plugin,
   including standard local and file-level suppression support.
+- Added the immutable, versioned `BetterEffectGraph` public model with stable
+  Module, provider, service, dependency, diagnostic, root, lifetime, key, and
+  source-location projections.
+- Added graph export in text, JSON, DOT, and Mermaid, plus SARIF diagnostics for
+  CI code-scanning integrations.
+- Added `--explain`, `--why`, `--unused`, `--schema-version`, and file-output
+  support to the graph CLI while preserving existing diagnostic output shapes.
+- Added conservative complete-root reachability queries, deterministic renderers,
+  embedded Dart APIs, schema negotiation, documentation, and CLI/API tests.
 
 ## 0.2.0
 
