@@ -1,6 +1,6 @@
 part of '../../better_effect_flutter.dart';
 
-/// Starts a long-lived better_effect Runtime and mounts the Flutter application.
+/// Starts an application-owned better_effect Runtime and mounts Flutter.
 ///
 /// This is the shortest application bootstrap:
 ///
@@ -13,14 +13,21 @@ part of '../../better_effect_flutter.dart';
 /// }
 /// ```
 ///
-/// The Runtime is exposed through [BetterEffectScope] and closed by
-/// [BetterEffectProvider] when the root is disposed or the Flutter view detaches.
+/// The Runtime is exposed through [BetterEffectScope]. Its shutdown follows
+/// [lifecyclePolicy], including cooperative interruption and grace-period
+/// behavior.
 Future<void> runBetterEffectApp({
   required Module module,
   required Widget app,
   ResolverBackend? backend,
   EffectCommandObserver? observer,
-  bool closeRuntimeOnDetach = true,
+  BetterEffectLifecyclePolicy lifecyclePolicy =
+      const BetterEffectLifecyclePolicy.application(),
+  @Deprecated(
+    'Use lifecyclePolicy.closeOnApplicationExit. '
+    'This compatibility parameter will be removed before 1.0.',
+  )
+  bool? closeRuntimeOnDetach,
   BetterEffectStartupErrorBuilder? startupErrorBuilder,
   void Function(Object error, StackTrace stackTrace)? onRuntimeCloseError,
 }) async {
@@ -40,31 +47,32 @@ Future<void> runBetterEffectApp({
     return;
   }
 
+  final effectivePolicy = BetterEffectLifecyclePolicy(
+    closeOnWidgetDispose: lifecyclePolicy.closeOnWidgetDispose,
+    closeOnApplicationExit:
+        closeRuntimeOnDetach ?? lifecyclePolicy.closeOnApplicationExit,
+    interruptExecutionsBeforeClose:
+        lifecyclePolicy.interruptExecutionsBeforeClose,
+    gracePeriod: lifecyclePolicy.gracePeriod,
+  );
+
   try {
     runApp(
       BetterEffectProvider(
         runtime: runtime,
         observer: observer,
-        closeRuntimeOnDetach: closeRuntimeOnDetach,
+        ownership: BetterEffectRuntimeOwnership.application,
+        lifecyclePolicy: effectivePolicy,
         onRuntimeCloseError: onRuntimeCloseError,
         child: app,
       ),
     );
   } catch (error, stackTrace) {
-    try {
-      await runtime.close();
-    } catch (closeError, closeStackTrace) {
-      FlutterError.reportError(
-        FlutterErrorDetails(
-          exception: closeError,
-          stack: closeStackTrace,
-          library: 'better_effect_flutter',
-          context: ErrorDescription(
-            'while closing a Runtime after runApp failed',
-          ),
-        ),
-      );
-    }
+    await _BetterEffectCloseConfiguration(
+      policy: effectivePolicy,
+      onError: onRuntimeCloseError,
+      ownerDescription: 'a Runtime after runApp failed',
+    ).close(runtime);
 
     Error.throwWithStackTrace(error, stackTrace);
   }

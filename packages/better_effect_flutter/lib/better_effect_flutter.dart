@@ -9,6 +9,7 @@ library;
 
 import 'dart:async';
 import 'dart:collection';
+import 'dart:ui' show AppExitResponse;
 
 import 'package:better_effect/better_effect.dart';
 import 'package:flutter/foundation.dart';
@@ -24,6 +25,7 @@ part 'src/command/effect_command_transition.dart';
 part 'src/command/effect_commands.dart';
 part 'src/context/build_context_extensions.dart';
 part 'src/scope/better_effect_bootstrap.dart';
+part 'src/scope/better_effect_lifecycle.dart';
 part 'src/scope/better_effect_provider.dart';
 part 'src/scope/better_effect_scope.dart';
 part 'src/view_model/effect_command_owner.dart';

@@ -16,11 +16,12 @@ typedef BetterEffectBootstrapErrorBuilder =
       VoidCallback retry,
     );
 
-/// Declaratively starts a [Module] inside an existing Flutter application.
+/// Declaratively starts an application-owned [Runtime] inside Flutter.
 ///
 /// Prefer [runBetterEffectApp] when better_effect owns the application root.
 /// Use this widget for add-to-app scenarios, tests, previews, or feature roots
-/// that need an asynchronous application Runtime.
+/// that need asynchronous Runtime startup. The Runtime is removed from the tree
+/// before any lifecycle-triggered close begins.
 final class BetterEffectBootstrap extends StatefulWidget {
   const BetterEffectBootstrap({
     required this.module,
@@ -31,10 +32,15 @@ final class BetterEffectBootstrap extends StatefulWidget {
     this.minimumLoadingDuration = Duration.zero,
     this.errorBuilder,
     this.restartKey,
-    this.closeRuntimeOnDetach = true,
+    this.lifecyclePolicy = const BetterEffectLifecyclePolicy.application(),
+    @Deprecated(
+      'Use lifecyclePolicy.closeOnApplicationExit. '
+      'This compatibility parameter will be removed before 1.0.',
+    )
+    bool? closeRuntimeOnDetach,
     this.onRuntimeCloseError,
     super.key,
-  });
+  }) : _legacyCloseOnApplicationExit = closeRuntimeOnDetach;
 
   final Module module;
 
@@ -60,15 +66,40 @@ final class BetterEffectBootstrap extends StatefulWidget {
   /// Changing this value restarts the Runtime even when [module] is identical.
   final Object? restartKey;
 
-  final bool closeRuntimeOnDetach;
+  /// Shutdown triggers and cooperative interruption options.
+  final BetterEffectLifecyclePolicy lifecyclePolicy;
+
+  final bool? _legacyCloseOnApplicationExit;
 
   final void Function(Object error, StackTrace stackTrace)? onRuntimeCloseError;
+
+  BetterEffectLifecyclePolicy get _effectiveLifecyclePolicy {
+    return BetterEffectLifecyclePolicy(
+      closeOnWidgetDispose: lifecyclePolicy.closeOnWidgetDispose,
+      closeOnApplicationExit:
+          _legacyCloseOnApplicationExit ??
+          lifecyclePolicy.closeOnApplicationExit,
+      interruptExecutionsBeforeClose:
+          lifecyclePolicy.interruptExecutionsBeforeClose,
+      gracePeriod: lifecyclePolicy.gracePeriod,
+    );
+  }
+
+  _BetterEffectCloseConfiguration get _closeConfiguration {
+    return _BetterEffectCloseConfiguration(
+      policy: _effectiveLifecyclePolicy,
+      onError: onRuntimeCloseError,
+      ownerDescription: 'a BetterEffectBootstrap Runtime',
+    );
+  }
 
   @override
   State<BetterEffectBootstrap> createState() => _BetterEffectBootstrapState();
 }
 
 final class _BetterEffectBootstrapState extends State<BetterEffectBootstrap> {
+  final Map<Runtime, Future<void>> _closeOperations = <Runtime, Future<void>>{};
+
   Runtime? _runtime;
   EffectCommands? _commands;
   Object? _error;
@@ -104,16 +135,21 @@ final class _BetterEffectBootstrapState extends State<BetterEffectBootstrap> {
   void didUpdateWidget(BetterEffectBootstrap oldWidget) {
     super.didUpdateWidget(oldWidget);
 
+    final lifecycleChanged =
+        oldWidget.lifecyclePolicy != widget.lifecyclePolicy ||
+        oldWidget._legacyCloseOnApplicationExit !=
+            widget._legacyCloseOnApplicationExit;
     final shouldRestart =
         !identical(oldWidget.module, widget.module) ||
+        !identical(oldWidget.backendFactory, widget.backendFactory) ||
         oldWidget.restartKey != widget.restartKey;
 
-    if (oldWidget.closeRuntimeOnDetach != widget.closeRuntimeOnDetach) {
+    if (lifecycleChanged) {
       _configureLifecycleListener();
     }
 
     if (shouldRestart) {
-      unawaited(_restart());
+      unawaited(_restart(previousConfiguration: oldWidget._closeConfiguration));
       return;
     }
 
@@ -128,8 +164,12 @@ final class _BetterEffectBootstrapState extends State<BetterEffectBootstrap> {
     _lifecycleListener?.dispose();
 
     final runtime = _runtime;
-    if (runtime != null) {
-      unawaited(_closeRuntime(runtime));
+    _runtime = null;
+    _commands = null;
+
+    if (runtime != null &&
+        widget._effectiveLifecyclePolicy.closeOnWidgetDispose) {
+      unawaited(_closeRuntime(runtime, widget._closeConfiguration));
     }
 
     super.dispose();
@@ -139,44 +179,47 @@ final class _BetterEffectBootstrapState extends State<BetterEffectBootstrap> {
   void initState() {
     super.initState();
     _configureLifecycleListener();
-    unawaited(_start());
-  }
-
-  Future<void> _closeRuntime(Runtime runtime) async {
-    try {
-      await runtime.close();
-    } catch (error, stackTrace) {
-      final handler = widget.onRuntimeCloseError;
-      if (handler != null) {
-        handler(error, stackTrace);
-        return;
-      }
-
-      FlutterError.reportError(
-        FlutterErrorDetails(
-          exception: error,
-          stack: stackTrace,
-          library: 'better_effect_flutter',
-          context: ErrorDescription(
-            'while closing a BetterEffectBootstrap Runtime',
-          ),
-        ),
-      );
-    }
+    unawaited(_start(configuration: widget._closeConfiguration));
   }
 
   void _configureLifecycleListener() {
     _lifecycleListener?.dispose();
-    _lifecycleListener = widget.closeRuntimeOnDetach
+
+    final policy = widget._effectiveLifecyclePolicy;
+    _lifecycleListener = policy.closeOnApplicationExit
         ? AppLifecycleListener(
             onDetach: () {
-              final runtime = _runtime;
-              if (runtime != null) {
-                unawaited(_closeRuntime(runtime));
-              }
+              unawaited(_closeForApplicationExit());
+            },
+            onExitRequested: () async {
+              await _closeForApplicationExit();
+              return AppExitResponse.exit;
             },
           )
         : null;
+  }
+
+  Future<void> _closeForApplicationExit() {
+    ++_generation;
+    final runtime = _runtime;
+
+    if (mounted) {
+      setState(() {
+        _runtime = null;
+        _commands = null;
+        _error = null;
+        _stackTrace = null;
+      });
+    } else {
+      _runtime = null;
+      _commands = null;
+    }
+
+    if (runtime == null) {
+      return Future<void>.value();
+    }
+
+    return _closeRuntime(runtime, widget._closeConfiguration);
   }
 
   Future<Stopwatch?> _prepareLoading(int generation) async {
@@ -194,7 +237,9 @@ final class _BetterEffectBootstrapState extends State<BetterEffectBootstrap> {
     return Stopwatch()..start();
   }
 
-  Future<void> _restart() async {
+  Future<void> _restart({
+    required _BetterEffectCloseConfiguration previousConfiguration,
+  }) async {
     final generation = ++_generation;
     final previous = _runtime;
 
@@ -208,22 +253,31 @@ final class _BetterEffectBootstrapState extends State<BetterEffectBootstrap> {
     }
 
     if (previous != null) {
-      await _closeRuntime(previous);
+      await _closeRuntime(previous, previousConfiguration);
     }
 
     if (!mounted || generation != _generation) {
       return;
     }
 
-    await _start(generation: generation);
+    await _start(
+      generation: generation,
+      configuration: widget._closeConfiguration,
+    );
   }
 
   void _retry() {
-    unawaited(_restart());
+    unawaited(_restart(previousConfiguration: widget._closeConfiguration));
   }
 
-  Future<void> _start({int? generation}) async {
+  Future<void> _start({
+    int? generation,
+    required _BetterEffectCloseConfiguration configuration,
+  }) async {
     final currentGeneration = generation ?? ++_generation;
+    final module = widget.module;
+    final backendFactory = widget.backendFactory;
+    final observer = widget.observer;
 
     final loadingStopwatch = await _prepareLoading(currentGeneration);
 
@@ -232,22 +286,18 @@ final class _BetterEffectBootstrapState extends State<BetterEffectBootstrap> {
     }
 
     try {
-      final runtime = await widget.module.start(
-        backend: widget.backendFactory?.call(),
-      );
+      final runtime = await module.start(backend: backendFactory?.call());
 
       await _waitMinimumLoadingDuration(loadingStopwatch);
 
       if (!mounted || currentGeneration != _generation) {
-        await _closeRuntime(runtime);
+        await _closeRuntime(runtime, configuration);
         return;
       }
 
       setState(() {
         _runtime = runtime;
-
-        _commands = EffectCommands(runtime, observer: widget.observer);
-
+        _commands = EffectCommands(runtime, observer: observer);
         _error = null;
         _stackTrace = null;
       });
@@ -265,6 +315,16 @@ final class _BetterEffectBootstrapState extends State<BetterEffectBootstrap> {
         _stackTrace = stackTrace;
       });
     }
+  }
+
+  Future<void> _closeRuntime(
+    Runtime runtime,
+    _BetterEffectCloseConfiguration configuration,
+  ) {
+    return _closeOperations.putIfAbsent(
+      runtime,
+      () => configuration.close(runtime),
+    );
   }
 
   Future<void> _waitMinimumLoadingDuration(Stopwatch? stopwatch) async {
