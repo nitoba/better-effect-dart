@@ -1,0 +1,28 @@
+{
+  "packages": [
+    {
+      "package": "better_effect",
+      "pubError": null,
+      "pubLatest": "0.1.1",
+      "run": null,
+      "tag": "better_effect-v0.2.0",
+      "workflow": "publish-better-effect.yml"
+    },
+    {
+      "package": "better_effect_analyzer",
+      "pubError": null,
+      "pubLatest": "0.1.3",
+      "run": null,
+      "tag": "better_effect_analyzer-v0.2.0",
+      "workflow": "publish-better-effect-analyzer.yml"
+    },
+    {
+      "package": "better_effect_flutter",
+      "pubError": null,
+      "pubLatest": "0.1.1",
+      "run": null,
+      "tag": "better_effect_flutter-v0.2.0",
+      "workflow": "publish-better-effect-flutter.yml"
+    }
+  ]
+}
