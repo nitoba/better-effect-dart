@@ -1,0 +1,148 @@
+name: Prepare v0.3.0 release branch
+
+on:
+  push:
+    branches:
+      - automation/prepare-v0.3.0
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout current main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Create release branch and update versions
+        run: |
+          git switch -c release/v0.3.0
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          VERSION = '0.3.0'
+
+          def replace_required(path: str, old: str, new: str, *, count: int | None = None) -> None:
+              file = Path(path)
+              source = file.read_text()
+              occurrences = source.count(old)
+              if occurrences == 0:
+                  raise SystemExit(f'{path}: missing required text: {old!r}')
+              if count is not None and occurrences != count:
+                  raise SystemExit(
+                      f'{path}: expected {count} occurrence(s) of {old!r}, found {occurrences}'
+                  )
+              file.write_text(source.replace(old, new))
+
+          def release_changelog(path: str) -> None:
+              replace_required(path, '## Unreleased', f'## {VERSION}', count=1)
+
+          replace_required('.github/RELEASE.md', '0.2.0', VERSION)
+          replace_required('README.md', '0.2.0', VERSION)
+          replace_required(
+              'apps/docs/content/docs/maintainers/releases.mdx',
+              'better_effect-v0.1.1',
+              f'better_effect-v{VERSION}',
+          )
+
+          replace_required(
+              'packages/better_effect/pubspec.yaml',
+              'version: 0.2.0',
+              f'version: {VERSION}',
+              count=1,
+          )
+          release_changelog('packages/better_effect/CHANGELOG.md')
+          replace_required(
+              'packages/better_effect/README.md',
+              'better_effect: ^0.2.0',
+              f'better_effect: ^{VERSION}',
+          )
+
+          replace_required(
+              'packages/better_effect_flutter/pubspec.yaml',
+              'version: 0.2.0',
+              f'version: {VERSION}',
+              count=1,
+          )
+          replace_required(
+              'packages/better_effect_flutter/pubspec.yaml',
+              'better_effect: ^0.2.0',
+              f'better_effect: ^{VERSION}',
+              count=1,
+          )
+          release_changelog('packages/better_effect_flutter/CHANGELOG.md')
+          replace_required(
+              'packages/better_effect_flutter/README.md',
+              'better_effect_flutter: ^0.2.0',
+              f'better_effect_flutter: ^{VERSION}',
+          )
+          replace_required(
+              'packages/better_effect_flutter/README.md',
+              'better_effect) 0.2.x',
+              'better_effect) 0.3.x',
+          )
+
+          replace_required(
+              'packages/better_effect_analyzer/pubspec.yaml',
+              'version: 0.2.0',
+              f'version: {VERSION}',
+              count=1,
+          )
+          release_changelog('packages/better_effect_analyzer/CHANGELOG.md')
+          replace_required(
+              'packages/better_effect_analyzer/README.md',
+              'better_effect` 0.2.x',
+              'better_effect` 0.3.x',
+          )
+          replace_required(
+              'packages/better_effect_analyzer/README.md',
+              'Version 0.2.0',
+              'Version 0.3.0',
+          )
+          replace_required(
+              'packages/better_effect_analyzer/README.md',
+              'better_effect_analyzer: ^0.2.0',
+              f'better_effect_analyzer: ^{VERSION}',
+          )
+          replace_required(
+              'packages/better_effect_analyzer/README.md',
+              'version: ^0.2.0',
+              f'version: ^{VERSION}',
+          )
+
+          versions = {
+              'better_effect': Path('packages/better_effect/pubspec.yaml').read_text(),
+              'better_effect_flutter': Path('packages/better_effect_flutter/pubspec.yaml').read_text(),
+              'better_effect_analyzer': Path('packages/better_effect_analyzer/pubspec.yaml').read_text(),
+          }
+          for package, source in versions.items():
+              if f'version: {VERSION}' not in source:
+                  raise SystemExit(f'{package}: version was not updated to {VERSION}')
+          PY
+
+      - name: Commit and push release branch
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -- \
+            .github/RELEASE.md \
+            README.md \
+            apps/docs/content/docs/maintainers/releases.mdx \
+            packages/better_effect/pubspec.yaml \
+            packages/better_effect/CHANGELOG.md \
+            packages/better_effect/README.md \
+            packages/better_effect_flutter/pubspec.yaml \
+            packages/better_effect_flutter/CHANGELOG.md \
+            packages/better_effect_flutter/README.md \
+            packages/better_effect_analyzer/pubspec.yaml \
+            packages/better_effect_analyzer/CHANGELOG.md \
+            packages/better_effect_analyzer/README.md
+          git commit -m 'chore(release): 0.3.0'
+          git push --force origin HEAD:release/v0.3.0
