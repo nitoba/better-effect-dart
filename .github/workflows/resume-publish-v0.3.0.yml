@@ -1,4 +1,4 @@
-name: Resume v0.3.0 package publication
+name: Finish publishable v0.3.0 packages
 
 on:
   push:
@@ -14,7 +14,7 @@ jobs:
   publish:
     if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 45
     env:
       GH_TOKEN: ${{ github.token }}
       VERSION: 0.3.0
@@ -27,28 +27,7 @@ jobs:
           ref: ${{ env.MAIN_SHA }}
           fetch-depth: 0
 
-      - name: Verify tags and GitHub Releases
-        run: |
-          set -euo pipefail
-
-          for package in \
-            better_effect \
-            better_effect_analyzer \
-            better_effect_flutter; do
-            tag="${package}-v${VERSION}"
-
-            git ls-remote --exit-code --tags origin "refs/tags/${tag}" >/dev/null
-
-            if ! gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-              gh release create "$tag" \
-                --repo "$GITHUB_REPOSITORY" \
-                --target "$MAIN_SHA" \
-                --title "${package} ${VERSION}" \
-                --generate-notes
-            fi
-          done
-
-      - name: Publish missing packages and verify pub.dev
+      - name: Publish core and Flutter when missing
         run: |
           set -Eeuo pipefail
 
@@ -68,7 +47,7 @@ jobs:
 
             gh issue comment 3 \
               --repo "$GITHUB_REPOSITORY" \
-              --body "The v0.3.0 publication resume failed while processing **${current_package}**. ${run_note} The package tags and GitHub Releases were preserved, and the milestone remains open until publication is verified." \
+              --body "The v0.3.0 publication failed while processing **${current_package}**. ${run_note} The package tags and GitHub Releases were preserved." \
               || true
           }
           trap report_failure ERR
@@ -82,28 +61,23 @@ jobs:
               <<<"$payload" >/dev/null
           }
 
-          discover_dispatched_run() {
+          discover_run() {
             local workflow="$1"
             local tag="$2"
             local since="$3"
-            local response
 
-            response="$(
-              gh api \
-                "repos/${GITHUB_REPOSITORY}/actions/workflows/${workflow}/runs?event=workflow_dispatch&per_page=30"
-            )"
-
-            jq -r \
-              --arg tag "$tag" \
-              --arg sha "$MAIN_SHA" \
-              --arg since "$since" \
-              '[.workflow_runs[]
-                | select(.created_at >= $since)
-                | select(.head_branch == $tag or .head_sha == $sha)]
-               | sort_by(.created_at)
-               | last
-               | .id // empty' \
-              <<<"$response"
+            gh api \
+              "repos/${GITHUB_REPOSITORY}/actions/workflows/${workflow}/runs?event=workflow_dispatch&per_page=30" \
+              | jq -r \
+                  --arg tag "$tag" \
+                  --arg sha "$MAIN_SHA" \
+                  --arg since "$since" \
+                  '[.workflow_runs[]
+                    | select(.created_at >= $since)
+                    | select(.head_branch == $tag or .head_sha == $sha)]
+                   | sort_by(.created_at)
+                   | last
+                   | .id // empty'
           }
 
           dispatch_and_wait() {
@@ -121,19 +95,14 @@ jobs:
               --ref "$tag"
 
             for attempt in $(seq 1 45); do
-              current_run_id="$(discover_dispatched_run "$workflow" "$tag" "$since")"
+              current_run_id="$(discover_run "$workflow" "$tag" "$since")"
               if [ -n "$current_run_id" ]; then
                 break
               fi
               sleep 2
             done
 
-            if [ -z "$current_run_id" ]; then
-              echo "Could not discover the dispatched $workflow run for $tag." >&2
-              return 1
-            fi
-
-            echo "Watching ${package} publication run ${current_run_id}."
+            test -n "$current_run_id"
             gh run watch "$current_run_id" \
               --repo "$GITHUB_REPOSITORY" \
               --exit-status
@@ -150,8 +119,6 @@ jobs:
               fi
               sleep 10
             done
-
-            echo "${package} ${VERSION} did not become visible on pub.dev." >&2
             return 1
           }
 
@@ -159,9 +126,8 @@ jobs:
             local package="$1"
             local workflow="$2"
 
-            current_package="$package"
             if package_is_visible "$package"; then
-              echo "${package} ${VERSION} is already published; skipping dispatch."
+              echo "${package} ${VERSION} is already published."
               return
             fi
 
@@ -169,34 +135,18 @@ jobs:
             wait_for_pubdev "$package"
           }
 
-          # better_effect_flutter resolves its hosted core dependency during the
-          # reusable workflow's publish dry-run, so core must be visible first.
           publish_if_missing better_effect publish-better-effect.yml
-          publish_if_missing better_effect_analyzer publish-better-effect-analyzer.yml
           publish_if_missing better_effect_flutter publish-better-effect-flutter.yml
 
-          for package in \
-            better_effect \
-            better_effect_analyzer \
-            better_effect_flutter; do
-            current_package="$package verification"
-            package_is_visible "$package"
-          done
-
+          package_is_visible better_effect
+          package_is_visible better_effect_flutter
           trap - ERR
 
-      - name: Close milestone and record the completed release
+      - name: Record the analyzer publishing blocker
         run: |
-          set -euo pipefail
-
-          gh api \
-            --method PATCH \
-            "repos/${GITHUB_REPOSITORY}/milestones/2" \
-            -f state=closed >/dev/null
-
           gh issue comment 3 \
             --repo "$GITHUB_REPOSITORY" \
-            --body "Released **v0.3.0** on August 20, 2026.\n\nPublished package tags and GitHub Releases:\n- \`better_effect-v0.3.0\`\n- \`better_effect_analyzer-v0.3.0\`\n- \`better_effect_flutter-v0.3.0\`\n\nAll three versions are visible on pub.dev, and milestone **v0.3 — Context & Observability** is closed."
+            --body "v0.3.0 release status on August 20, 2026:\n\n- ✅ \`better_effect 0.3.0\` is published on pub.dev.\n- ✅ \`better_effect_flutter 0.3.0\` is published on pub.dev.\n- ⛔ \`better_effect_analyzer 0.3.0\` passed its publish dry-run, but pub.dev rejected the upload because **Publishing from GitHub Actions is not enabled** for that package.\n\nThe analyzer tag and GitHub Release already exist: \`better_effect_analyzer-v0.3.0\`. To complete the release, enable automated publishing in the package Admin tab with repository \`nitoba/better-effect-dart\` and tag pattern \`better_effect_analyzer-v{{version}}\`, then rerun **Publish better_effect_analyzer** at that tag. Milestone v0.3 remains open until this last publication succeeds."
 
       - name: Delete temporary automation branch
         run: git push origin --delete automation/resume-publish-v0.3.0
