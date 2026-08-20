@@ -84,7 +84,7 @@ Or add it manually:
 
 ```yaml
 dependencies:
-  better_effect: ^0.1.1
+  better_effect: ^0.2.0
 ```
 
 During local monorepo development, a path dependency can be used instead:
@@ -303,7 +303,7 @@ final appModule = Module([
       final config = services<AppConfig>();
       return DatabaseConnection.connect(config.apiUrl);
     },
-    release: (connection) => connection.close(),
+    release: (connection, _) => connection.close(),
   ),
 ]);
 ```
@@ -319,7 +319,7 @@ final effect = Effect<String, AppFailure>.result((use) async {
       onError: (error, stackTrace) =>
           DatabaseFailure.from(error, stackTrace),
     ),
-    release: (connection) => connection.close(),
+    release: (connection, _) => connection.close(),
   );
 
   return connection.queryGreeting();

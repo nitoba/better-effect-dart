@@ -1,4 +1,4 @@
-## Unreleased
+## 0.2.0
 
 - Effect Commands now start work through core `EffectExecution` handles.
 - Command cancellation and disposal request cooperative core interruption while

@@ -1,4 +1,4 @@
-## Unreleased
+## 0.2.0
 
 - Added `resource_dependency_declared_after_provider` to detect direct and
   transitive resource dependencies that are acquired too late during Module

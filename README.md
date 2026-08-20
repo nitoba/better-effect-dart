@@ -8,9 +8,9 @@ release workflow.
 
 | Package | Purpose | Current version |
 | --- | --- | --- |
-| [`better_effect`](packages/better_effect) | Typed effects, dependency injection, resource scopes, and error propagation | `0.1.1` |
-| [`better_effect_flutter`](packages/better_effect_flutter) | Flutter MVVM integration, commands, scopes, and widgets | `0.1.1` |
-| [`better_effect_analyzer`](packages/better_effect_analyzer) | Static analysis and whole-project dependency-graph diagnostics | `0.1.3` |
+| [`better_effect`](packages/better_effect) | Typed effects, dependency injection, resource scopes, and error propagation | `0.2.0` |
+| [`better_effect_flutter`](packages/better_effect_flutter) | Flutter MVVM integration, commands, scopes, and widgets | `0.2.0` |
+| [`better_effect_analyzer`](packages/better_effect_analyzer) | Static analysis and whole-project dependency-graph diagnostics | `0.2.0` |
 
 The Flutter sample application lives at
 [`packages/better_effect_flutter/example`](packages/better_effect_flutter/example).
@@ -88,8 +88,8 @@ example application; publishable package lockfiles remain ignored.
 Publishing is triggered only by a package-specific tag:
 
 ```bash
-git tag better_effect-v0.1.1
-git push origin better_effect-v0.1.1
+git tag better_effect-v0.2.0
+git push origin better_effect-v0.2.0
 ```
 
 Use `better_effect_flutter-v{{version}}` and
