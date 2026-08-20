@@ -130,7 +130,9 @@ sealed class EffectCommandBase<A extends Object, E extends Object>
          revision: 0,
          executionId: 0,
          previous: null,
-       );
+       ) {
+    _snapshotNotifier = _EffectCommandSnapshotNotifier<A, E>(_createSnapshot());
+  }
 
   final Runtime _runtime;
   final EffectCommandStateObserver<A, E>? _stateObserver;
@@ -143,6 +145,7 @@ sealed class EffectCommandBase<A extends Object, E extends Object>
       <int, Completer<Exit<A, E>>>{};
   final Map<int, EffectExecution<A, E>> _runtimeExecutions =
       <int, EffectExecution<A, E>>{};
+  late final _EffectCommandSnapshotNotifier<A, E> _snapshotNotifier;
 
   /// Immutable execution and trigger policy.
   final CommandPolicy policy;
@@ -225,6 +228,13 @@ sealed class EffectCommandBase<A extends Object, E extends Object>
   /// Whether a debounce/throttle trailing invocation is currently waiting.
   int get triggerPendingCount => _pendingTrigger == null ? 0 : 1;
 
+  /// Read-only state and coordination metadata for selectors.
+  ValueListenable<EffectCommandSnapshot<A, E>> get snapshot =>
+      _snapshotNotifier;
+
+  /// Current selector snapshot without adding a listener.
+  EffectCommandSnapshot<A, E> get snapshotValue => _snapshotNotifier.value;
+
   /// Latest success/failure as Result. Defects and interruption return null.
   ResultDart<A, E>? get resultOrNull => switch (_lastExit) {
     ExitSuccess<A, E>(:final value) => Success<A, E>(value),
@@ -236,6 +246,22 @@ sealed class EffectCommandBase<A extends Object, E extends Object>
   EffectCommandState<A, E> get value => _value;
 
   A? get _retainedData => keepPreviousData ? _lastSuccess : null;
+
+  EffectCommandSnapshot<A, E> _createSnapshot() {
+    return EffectCommandSnapshot<A, E>(
+      state: _value,
+      lastExit: _lastExit,
+      pendingCount: pendingCount,
+      queuedCount: queuedCount,
+      triggerPendingCount: triggerPendingCount,
+      policy: policy,
+    );
+  }
+
+  void _publishSnapshot() {
+    if (_disposed) return;
+    _snapshotNotifier.update(_createSnapshot());
+  }
 
   /// Interrupt current ownership and optionally clear policy-pending callers.
   ///
@@ -380,6 +406,7 @@ sealed class EffectCommandBase<A extends Object, E extends Object>
       }
     }
 
+    _snapshotNotifier.dispose();
     super.dispose();
   }
 
@@ -604,6 +631,7 @@ sealed class EffectCommandBase<A extends Object, E extends Object>
         createEffect,
       );
       _pendingTrigger = pending;
+      _publishSnapshot();
       _emitPolicyEvent(
         decision: CommandPolicyDecision.triggerScheduled,
         invocationId: invocationId,
@@ -678,6 +706,7 @@ sealed class EffectCommandBase<A extends Object, E extends Object>
     _queue.addLast(
       _QueuedEffectExecution<A, E>(invocationId, createEffect, caller),
     );
+    _publishSnapshot();
     _emitPolicyEvent(
       decision: CommandPolicyDecision.queued,
       invocationId: invocationId,
@@ -819,6 +848,7 @@ sealed class EffectCommandBase<A extends Object, E extends Object>
         _activeExecutionId = null;
         _startNextQueuedIfPossible();
       }
+      _publishSnapshot();
     }
   }
 
@@ -922,6 +952,7 @@ sealed class EffectCommandBase<A extends Object, E extends Object>
   void _onTriggerFired(TriggerPolicyKind kind) {
     final pending = _pendingTrigger;
     _pendingTrigger = null;
+    _publishSnapshot();
 
     if (kind == TriggerPolicyKind.debounce) {
       _triggerWindowOpen = false;
@@ -993,6 +1024,7 @@ sealed class EffectCommandBase<A extends Object, E extends Object>
       );
     }
     _pendingTrigger = pending;
+    _publishSnapshot();
   }
 
   bool _interruptPendingTrigger(CommandPolicyReason reason) {
@@ -1000,6 +1032,7 @@ sealed class EffectCommandBase<A extends Object, E extends Object>
     if (pending == null) return false;
 
     _pendingTrigger = null;
+    _publishSnapshot();
     _completeInterrupted(pending.completer);
     _emitPolicyEvent(
       decision: CommandPolicyDecision.cancelled,
@@ -1021,6 +1054,7 @@ sealed class EffectCommandBase<A extends Object, E extends Object>
         reason: reason,
       );
     }
+    if (changed) _publishSnapshot();
     return changed;
   }
 
@@ -1157,6 +1191,7 @@ sealed class EffectCommandBase<A extends Object, E extends Object>
 
     final previous = _value;
     _value = state;
+    _publishSnapshot();
     notifyListeners();
 
     final stateObserver = _stateObserver;

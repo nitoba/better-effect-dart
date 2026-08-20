@@ -7,6 +7,7 @@ final class EffectCommandConsumer<A extends Object, E extends Object>
     required this.command,
     required this.builder,
     this.child,
+    this.buildWhen,
     this.listenWhen,
     this.onChanged,
     this.onIdle,
@@ -22,6 +23,7 @@ final class EffectCommandConsumer<A extends Object, E extends Object>
   final ValueListenable<EffectCommandState<A, E>> command;
   final EffectCommandWidgetBuilder<A, E> builder;
   final Widget? child;
+  final EffectCommandBuildWhen<A, E>? buildWhen;
   final EffectCommandListenWhen<A, E>? listenWhen;
   final EffectCommandChanged<A, E>? onChanged;
   final EffectCommandIdleListener<A>? onIdle;
@@ -48,6 +50,7 @@ final class EffectCommandConsumer<A extends Object, E extends Object>
       child: EffectCommandBuilder<A, E>(
         command: command,
         builder: builder,
+        buildWhen: buildWhen,
         child: child,
       ),
     );

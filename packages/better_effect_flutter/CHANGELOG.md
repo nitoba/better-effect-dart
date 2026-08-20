@@ -1,5 +1,10 @@
 ## Unreleased
 
+- Added `EffectCommandSelector` with strongly typed state and snapshot selection.
+- Added default `==` and custom equality strategies for selected values.
+- Added `EffectCommandBuilder.buildWhen` and matching Consumer support.
+- Added read-only `EffectCommandSnapshot` updates for pending, queued, and trigger-pending counts without artificial state revisions.
+
 - Added immutable `CommandPolicy.drop`, `latest`, and `queue`
   coordination without adding new Command classes.
 - Added optional cooperative previous-execution interruption for

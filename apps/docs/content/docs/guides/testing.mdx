@@ -331,3 +331,32 @@ liberar timers e trabalho físico.
 - dispose probes, ViewModels e Commands nos boundaries corretos;
 - rode o TCK quando publicar um backend customizado;
 - mantenha analyzer, graph checker, unit tests e widget tests como gates separados.
+
+
+## Teste seletores e filtros de rebuild
+
+Conte builds e controle a execução com `TestGate` ou
+`ManualEffectClock`. Verifique separadamente:
+
+- o valor selecionado e a igualdade customizada;
+- troca da instância de Command;
+- retenção do `child`;
+- `buildWhen` aceitando e recusando transições;
+- `pendingCount` e `queuedCount` por snapshot;
+- listener one-shot usado junto do selector.
+
+```dart
+final selected = <bool>[];
+
+await tester.pumpWidget(
+  EffectCommandSelector<User, UserFailure, bool>(
+    command: command,
+    selector: (state) => state.isRunning,
+    builder: (context, running, child) {
+      selected.add(running);
+      return child!;
+    },
+    child: const UserContent(),
+  ),
+);
+```

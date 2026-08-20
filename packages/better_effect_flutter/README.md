@@ -365,7 +365,57 @@ a failure. Set `keepPreviousData: false` when the View must clear
 data during those states. The retained value is available through
 `state.dataOrNull` or `state.previousOrNull`.
 
-## Render state and one-shot effects
+
+    ## Select state without rebuilding the whole subtree
+
+    `EffectCommandSelector` rebuilds only when its strongly typed selected
+    value changes. Default equality uses Dart `==`:
+
+    ```dart
+    EffectCommandSelector<User, AppFailure, bool>(
+      command: viewModel.loadUser,
+      selector: (state) => state.isRunning,
+      child: const UserContent(),
+      builder: (context, isRunning, child) {
+        return LoadingOverlay(visible: isRunning, child: child!);
+      },
+    )
+    ```
+
+    Collections can supply custom equality:
+
+    ```dart
+    equals: (previous, current) => listEquals(previous, current),
+    ```
+
+    Select queue and policy counts from the Command snapshot without
+    changing the durable state revision:
+
+    ```dart
+    EffectCommandSelector.snapshot(
+      command: viewModel.save,
+      selector: (snapshot) => snapshot.queuedCount,
+      builder: (context, queued, child) => QueueBadge(count: queued),
+    )
+    ```
+
+    Existing builders can filter transitions directly:
+
+    ```dart
+    EffectCommandBuilder<User, AppFailure>(
+      command: viewModel.loadUser,
+      buildWhen: (previous, current) =>
+          previous.dataOrNull != current.dataOrNull,
+      builder: ...,
+    )
+    ```
+
+    Selectors never consume listener revisions. Keep navigation,
+    SnackBars, dialogs, and analytics in `EffectCommandListener`.
+    See [`doc/command_selectors.md`](doc/command_selectors.md) for
+    equality, replacement, snapshot, and testing guidance.
+
+    ## Render state and one-shot effects
 
 ### `EffectCommandBuilder`
 
