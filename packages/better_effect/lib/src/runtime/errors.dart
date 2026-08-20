@@ -71,6 +71,19 @@ final class ResourceAcquisitionException implements Exception {
   }
 }
 
+/// Reported when a custom backend cannot create an execution-local overlay.
+final class ResolverBackendOverlayUnsupportedException implements Exception {
+  const ResolverBackendOverlayUnsupportedException(this.backendType);
+
+  final Type backendType;
+
+  @override
+  String toString() {
+    return '$backendType does not support execution-scoped Modules. '
+        'Implement ResolverBackendOverlayFactory or use AutoInjectorBackend.';
+  }
+}
+
 /// Thrown when an operation is attempted after a [Runtime] stops accepting work.
 final class RuntimeClosedException implements Exception {
   const RuntimeClosedException();

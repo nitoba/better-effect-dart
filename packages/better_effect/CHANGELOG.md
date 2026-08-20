@@ -1,3 +1,18 @@
+## Unreleased
+
+- Added `Runtime.executeWith`, `runWith`, and `runExitWith` for temporary
+  execution-scoped Modules.
+- Execution Modules resolve local providers first and fall back to the root
+  Runtime without mutating root registrations.
+- Local constructor injection can combine execution-local and root services,
+  including typed `ServiceKey` registrations.
+- Execution Module resources share the managed execution Scope and remain owned
+  until physical completion after timeout or interruption.
+- Partial local startup failures release previously acquired resources before
+  publishing an execution defect.
+- Added the optional `ResolverBackendOverlayFactory` capability for custom
+  backends; `AutoInjectorBackend` supports isolated overlays by default.
+
 ## 0.2.0
 
 - Added owned `Scope.make()` values with public child Scope, finalizer,

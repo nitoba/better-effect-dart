@@ -30,3 +30,18 @@ abstract interface class ResolverBackend {
   /// Release all backend-owned state.
   FutureOr<void> close();
 }
+
+/// Optional backend capability used by [RuntimeExecutionModuleOps].
+///
+/// An execution overlay owns an isolated registration set that resolves its
+/// local services first and falls back to the backend that created it. Closing
+/// the overlay must release only overlay-owned state; it must never close or
+/// mutate the parent backend.
+///
+/// Custom backends that do not implement this capability can still power normal
+/// Runtime execution, but `runWith`, `runExitWith`, and `executeWith` complete
+/// with [ResolverBackendOverlayUnsupportedException].
+abstract interface class ResolverBackendOverlayFactory {
+  /// Create one isolated, local-first child backend.
+  ResolverBackend createExecutionOverlay();
+}

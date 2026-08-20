@@ -120,6 +120,31 @@ void main() {
         contains('ReportResource -> Repository -> Database'),
       );
     });
+    test(
+      'allows root requirements in a statically visible runWith Module',
+      () async {
+        _writeExecutionModuleSource(app, invalidLocalResourceOrder: false);
+
+        final result = await BetterEffectGraphChecker(app.path).check();
+
+        expect(
+          result.diagnostics.map((diagnostic) => diagnostic.code),
+          isNot(contains('missing_service')),
+        );
+      },
+    );
+
+    test('still validates local resource order in a runWith Module', () async {
+      _writeExecutionModuleSource(app, invalidLocalResourceOrder: true);
+
+      final result = await BetterEffectGraphChecker(app.path).check();
+      final diagnostic = result.diagnostics.singleWhere(
+        (item) => item.code == 'resource_dependency_declared_after_provider',
+      );
+
+      expect(diagnostic.message, contains("Resource 'RequestResource'"));
+      expect(diagnostic.message, contains("requires 'LocalDatabase'"));
+    });
   });
 }
 
@@ -202,9 +227,13 @@ sealed class Binding {
     ServiceKey<T>? key,
   }) => const _Binding();
 
+  static Binding instance<T extends Object>(
+    T value, {
+    ServiceKey<T>? key,
+  }) => const _Binding();
   static Binding resource<T extends Object>({
     required FutureOr<T> Function(Services services) acquire,
-    required FutureOr<void> Function(T value) release,
+    required FutureOr<void> Function(T value, Object exit) release,
     ServiceKey<T>? key,
   }) => const _Binding();
 }
@@ -225,6 +254,13 @@ final class Services {
 
 final class Module {
   Module(Iterable<Binding> bindings);
+}
+final class Runtime {
+  Future<Object> runWith(Module module, Object effect) async => Object();
+
+  Future<Object> runExitWith(Module module, Object effect) async => Object();
+
+  Object executeWith(Module module, Object effect) => Object();
 }
 ''');
 }
@@ -261,7 +297,7 @@ void _writeResourceSource(Directory app, {required bool databaseFirst}) {
   final database = '''
   .resource<Database>(
     acquire: (_) async => DatabaseLive(),
-    release: (_) async {},
+    release: (_, _) async {},
   ),
 ''';
   final report = '''
@@ -270,7 +306,7 @@ void _writeResourceSource(Directory app, {required bool databaseFirst}) {
       services<Database>();
       return ReportResource();
     },
-    release: (_) async {},
+    release: (_, _) async {},
   ),
 ''';
 
@@ -311,13 +347,76 @@ final appModule = Module([
       services<Repository>();
       return ReportResource();
     },
-    release: (_) async {},
+    release: (_, _) async {},
   ),
   .provide<Repository>(Repository.new),
   .resource<Database>(
     acquire: (_) async => DatabaseLive(),
-    release: (_) async {},
+    release: (_, _) async {},
   ),
 ]);
+''');
+}
+
+void _writeExecutionModuleSource(
+  Directory app, {
+  required bool invalidLocalResourceOrder,
+}) {
+  final source = File(p.join(app.path, 'lib', 'execution.dart'))
+    ..parent.createSync(recursive: true);
+
+  final orderedBindings = invalidLocalResourceOrder
+      ? '''
+  .resource<RequestResource>(
+    acquire: (services) async {
+      services<LocalDatabase>();
+      return RequestResource();
+    },
+    release: (_, _) async {},
+  ),
+  .resource<LocalDatabase>(
+    acquire: (_) async => LocalDatabase(),
+    release: (_, _) async {},
+  ),
+'''
+      : '''
+  .instance<RequestContext>(RequestContext()),
+  .provide<RequestRepository>(RequestRepository.new),
+''';
+
+  source.writeAsStringSync('''
+import 'package:better_effect/better_effect.dart';
+
+abstract interface class Database {}
+final class DatabaseLive implements Database {}
+final class RequestContext {}
+
+final class RequestRepository {
+  RequestRepository(this.database, this.context);
+  final Database database;
+  final RequestContext context;
+}
+
+final class LocalDatabase {}
+final class RequestResource {}
+final class AppFailure implements Exception {}
+
+final rootModule = Module([
+  .resource<Database>(
+    acquire: (_) async => DatabaseLive(),
+    release: (_, _) async {},
+  ),
+]);
+
+final requestModule = Module([
+$orderedBindings
+]);
+
+Future<void> handle(Runtime runtime) async {
+  await runtime.runWith(
+    requestModule,
+    Effect<int, AppFailure>.result((use) async => 1),
+  );
+}
 ''');
 }

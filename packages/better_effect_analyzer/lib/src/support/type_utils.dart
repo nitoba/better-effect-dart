@@ -75,6 +75,10 @@ bool isModuleType(DartType? type) {
   return isTypeFromLibrary(type, 'Module', betterEffectLibraryUri);
 }
 
+bool isRuntimeType(DartType? type) {
+  return isTypeFromLibrary(type, 'Runtime', betterEffectLibraryUri);
+}
+
 bool isBindingMember(Element? element) {
   return element?.enclosingElement?.name == 'Binding' &&
       elementLibraryUri(element) == betterEffectLibraryUri;

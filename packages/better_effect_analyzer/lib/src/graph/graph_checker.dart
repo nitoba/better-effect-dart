@@ -200,6 +200,7 @@ final class _ProjectIndex {
   final String rootPath;
   final Map<String, _ClassInfo> classes = <String, _ClassInfo>{};
   final Map<String, _ModuleInfo> modules = <String, _ModuleInfo>{};
+  final Set<String> executionModuleIds = <String>{};
 
   void addUnit(ResolvedUnitResult result) {
     result.unit.accept(_UnitCollector(result, this));
@@ -236,15 +237,32 @@ final class _ProjectIndex {
       if (moduleNames.isNotEmpty) {
         return moduleNames.contains(module.name);
       }
-      return !referencedModules.contains(module.id);
+      return !referencedModules.contains(module.id) &&
+          !executionModuleIds.contains(module.id);
     });
 
     for (final root in roots) {
       yield* _validateModule(root);
     }
+
+    // Runtime.runWith/runExitWith/executeWith Modules are overlays. Their
+    // unresolved requirements may be supplied by the long-lived root Runtime,
+    // while duplicate, incompatible, cyclic and local resource-order defects
+    // remain independently valid.
+    if (moduleNames.isEmpty) {
+      for (final id in executionModuleIds) {
+        final module = modules[id];
+        if (module != null) {
+          yield* _validateModule(module, allowExternalRequirements: true);
+        }
+      }
+    }
   }
 
-  Iterable<GraphDiagnostic> _validateModule(_ModuleInfo root) sync* {
+  Iterable<GraphDiagnostic> _validateModule(
+    _ModuleInfo root, {
+    bool allowExternalRequirements = false,
+  }) sync* {
     final flattened = <String, _ProviderInfo>{};
     final expansionStack = <String>{};
 
@@ -312,7 +330,8 @@ final class _ProjectIndex {
       }
 
       for (final dependency in _providerDependencies(provider)) {
-        if (!flattened.containsKey(dependency.identity)) {
+        if (!flattened.containsKey(dependency.identity) &&
+            !allowExternalRequirements) {
           yield _diagnostic(
             code: 'missing_service',
             message:
@@ -541,6 +560,9 @@ final class _UnitCollector extends RecursiveAstVisitor<void> {
       _collectOverrideModule(node);
     }
 
+    if (_isExecutionModuleInvocation(node)) {
+      _collectExecutionModule(node);
+    }
     super.visitMethodInvocation(node);
   }
 
@@ -550,6 +572,57 @@ final class _UnitCollector extends RecursiveAstVisitor<void> {
       _collectModule(node);
     }
     super.visitInstanceCreationExpression(node);
+  }
+
+  bool _isExecutionModuleInvocation(MethodInvocation node) {
+    return const <String>{
+          'runWith',
+          'runExitWith',
+          'executeWith',
+        }.contains(node.methodName.name) &&
+        isRuntimeType(node.target?.staticType);
+  }
+
+  void _collectExecutionModule(MethodInvocation node) {
+    final first = _firstPositionalArgument(node.argumentList);
+    if (first is! Expression) return;
+
+    final id = _executionModuleId(first);
+    if (id != null) {
+      index.executionModuleIds.add(id);
+    }
+  }
+
+  String? _executionModuleId(Expression expression) {
+    if (expression is InstanceCreationExpression &&
+        isModuleType(expression.staticType)) {
+      return _moduleForDeclaration(
+        _moduleDeclarationFor(expression),
+        expression,
+      ).id;
+    }
+
+    if (expression is MethodInvocation &&
+        expression.methodName.name == 'overrideWith' &&
+        isModuleType(expression.staticType)) {
+      return _moduleForDeclaration(
+        _moduleDeclarationFor(expression),
+        expression,
+        isOverride: true,
+        baseModuleId: _moduleReferenceId(expression.target),
+      ).id;
+    }
+
+    return _moduleReferenceId(expression);
+  }
+
+  VariableDeclaration? _moduleDeclarationFor(AstNode node) {
+    final declaration = node.thisOrAncestorOfType<VariableDeclaration>();
+    if (declaration == null) return null;
+
+    return identical(declaration.initializer?.unParenthesized, node)
+        ? declaration
+        : null;
   }
 
   void _collectClassDependency(AstNode node) {
@@ -569,7 +642,7 @@ final class _UnitCollector extends RecursiveAstVisitor<void> {
   }
 
   void _collectModule(InstanceCreationExpression node) {
-    final declaration = node.thisOrAncestorOfType<VariableDeclaration>();
+    final declaration = _moduleDeclarationFor(node);
     final module = _moduleForDeclaration(declaration, node);
 
     if (node.constructorName.name?.name == 'merge') {
@@ -592,7 +665,7 @@ final class _UnitCollector extends RecursiveAstVisitor<void> {
   }
 
   void _collectOverrideModule(MethodInvocation node) {
-    final declaration = node.thisOrAncestorOfType<VariableDeclaration>();
+    final declaration = _moduleDeclarationFor(node);
     final module = _moduleForDeclaration(
       declaration,
       node,

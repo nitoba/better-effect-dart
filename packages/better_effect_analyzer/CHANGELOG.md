@@ -1,3 +1,10 @@
+## Unreleased
+
+- The graph checker now recognizes Modules passed directly to
+  `Runtime.runWith`, `runExitWith`, and `executeWith` as execution overlays.
+- Execution Modules may declare requirements supplied by the root Runtime while
+  retaining duplicate, compatibility, cycle, and local resource-order checks.
+
 ## 0.2.0
 
 - Added `resource_dependency_declared_after_provider` to detect direct and
