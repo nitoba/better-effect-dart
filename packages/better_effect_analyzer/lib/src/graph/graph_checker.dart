@@ -12,6 +12,7 @@ import 'package:path/path.dart' as p;
 import '../support/invocation.dart';
 import '../support/lifecycle_analysis.dart';
 import '../support/type_utils.dart';
+import 'graph_model.dart';
 
 /// Severity used by project-wide graph diagnostics.
 enum GraphDiagnosticSeverity { info, warning, error }
@@ -127,6 +128,23 @@ final class GraphCheckResult {
   }
 }
 
+/// Public analysis result containing diagnostics and the reusable graph.
+final class BetterEffectGraphAnalysis {
+  BetterEffectGraphAnalysis({
+    required this.graph,
+    required Iterable<GraphDiagnostic> diagnostics,
+  }) : diagnostics = List<GraphDiagnostic>.unmodifiable(diagnostics);
+
+  final BetterEffectGraph graph;
+  final List<GraphDiagnostic> diagnostics;
+
+  GraphCheckResult get checkResult => GraphCheckResult(diagnostics);
+
+  bool get hasErrors => checkResult.hasErrors;
+
+  bool get hasWarnings => checkResult.hasWarnings;
+}
+
 /// Resolves the Dart package and validates complete better_effect Module roots.
 ///
 /// This checker complements the IDE plugin. A normal analysis rule sees one
@@ -138,7 +156,8 @@ final class BetterEffectGraphChecker {
 
   final String rootPath;
 
-  Future<GraphCheckResult> check({
+  /// Analyze diagnostics and build the immutable public dependency graph.
+  Future<BetterEffectGraphAnalysis> analyze({
     GraphCheckOptions options = const GraphCheckOptions(),
   }) async {
     final pubspec = File(p.join(rootPath, 'pubspec.yaml'));
@@ -157,13 +176,19 @@ final class BetterEffectGraphChecker {
           Directory(p.join(rootPath, 'test')).existsSync())
         p.join(rootPath, 'test'),
     ];
+    final index = _ProjectIndex(rootPath);
 
     if (includedPaths.isEmpty) {
-      return GraphCheckResult(const <GraphDiagnostic>[]);
+      return BetterEffectGraphAnalysis(
+        graph: index.buildGraph(
+          moduleNames: options.moduleNames,
+          diagnostics: const <GraphDiagnostic>[],
+        ),
+        diagnostics: const <GraphDiagnostic>[],
+      );
     }
 
     final collection = AnalysisContextCollection(includedPaths: includedPaths);
-    final index = _ProjectIndex(rootPath);
     final lifecycleDiagnostics = <GraphDiagnostic>[];
 
     try {
@@ -196,13 +221,34 @@ final class BetterEffectGraphChecker {
         }
       }
 
-      return GraphCheckResult(<GraphDiagnostic>[
+      final checkResult = GraphCheckResult(<GraphDiagnostic>[
         ...index.validate(moduleNames: options.moduleNames),
         ...lifecycleDiagnostics,
       ]);
+      return BetterEffectGraphAnalysis(
+        graph: index.buildGraph(
+          moduleNames: options.moduleNames,
+          diagnostics: checkResult.diagnostics,
+        ),
+        diagnostics: checkResult.diagnostics,
+      );
     } finally {
       await collection.dispose();
     }
+  }
+
+  /// Compatibility wrapper returning the existing diagnostic-only result.
+  Future<GraphCheckResult> check({
+    GraphCheckOptions options = const GraphCheckOptions(),
+  }) async {
+    return (await analyze(options: options)).checkResult;
+  }
+
+  /// Build only the reusable public graph.
+  Future<BetterEffectGraph> graph({
+    GraphCheckOptions options = const GraphCheckOptions(),
+  }) async {
+    return (await analyze(options: options)).graph;
   }
 
   bool _shouldAnalyze(String filePath, GraphCheckOptions options) {
@@ -290,6 +336,312 @@ final class _ProjectIndex {
         }
       }
     }
+  }
+
+  BetterEffectGraph buildGraph({
+    required Set<String> moduleNames,
+    required List<GraphDiagnostic> diagnostics,
+  }) {
+    final rootKinds = _graphRootKinds(moduleNames);
+    final moduleValues = modules.values.toList()
+      ..sort((left, right) => left.id.compareTo(right.id));
+    final graphModules = <BetterEffectGraphModule>[];
+    final graphServices = <String, BetterEffectGraphService>{};
+    final graphProviders = <BetterEffectGraphProvider>[];
+    final graphDependencies = <BetterEffectGraphDependency>[];
+
+    for (final module in moduleValues) {
+      final effective =
+          <String, ({_ProviderInfo provider, String declaredModuleId})>{};
+      _flattenGraphModule(module, effective, <String>{});
+      final providerIds = <String>[];
+      final declaredProviderIds = <String>[];
+
+      for (final entry in effective.entries) {
+        final provider = entry.value.provider;
+        final declaredModuleId = entry.value.declaredModuleId;
+        final providerId = '${module.id}::${provider.service.identity}';
+        providerIds.add(providerId);
+        if (declaredModuleId == module.id) {
+          declaredProviderIds.add(providerId);
+        }
+        _registerGraphService(graphServices, provider.service);
+
+        final dependencies =
+            <({_ServiceRef service, BetterEffectDependencyKind kind})>[];
+        for (final dependency in provider.constructorDependencies) {
+          dependencies.add((
+            service: dependency,
+            kind: BetterEffectDependencyKind.constructor,
+          ));
+        }
+        final implementationId = provider.implementation?.baseElementId;
+        final implementationClass = implementationId == null
+            ? null
+            : classes[implementationId];
+        if (implementationClass != null) {
+          for (final dependency in implementationClass.dependencies) {
+            dependencies.add((
+              service: dependency,
+              kind: BetterEffectDependencyKind.contextual,
+            ));
+          }
+        }
+        for (final dependency in provider.inlineDependencies) {
+          dependencies.add((
+            service: dependency,
+            kind: BetterEffectDependencyKind.resource,
+          ));
+        }
+        dependencies.sort((left, right) {
+          final serviceOrder = left.service.identity.compareTo(
+            right.service.identity,
+          );
+          if (serviceOrder != 0) return serviceOrder;
+          return left.kind.name.compareTo(right.kind.name);
+        });
+
+        final dependencyIds = <String>[];
+        final emittedDependencies = <String>{};
+        for (final dependency in dependencies) {
+          _registerGraphService(graphServices, dependency.service);
+          final dependencyId =
+              '$providerId::${dependency.kind.name}::${dependency.service.identity}';
+          if (!emittedDependencies.add(dependencyId)) continue;
+          dependencyIds.add(dependencyId);
+          graphDependencies.add(
+            BetterEffectGraphDependency(
+              id: dependencyId,
+              providerId: providerId,
+              serviceId: dependency.service.identity,
+              kind: dependency.kind,
+              isResolved: effective.containsKey(dependency.service.identity),
+              location: _publicLocationOrNull(dependency.service.location),
+            ),
+          );
+        }
+
+        graphProviders.add(
+          BetterEffectGraphProvider(
+            id: providerId,
+            moduleId: module.id,
+            declaredModuleId: declaredModuleId,
+            serviceId: provider.service.identity,
+            serviceDisplay: provider.service.display,
+            implementationDisplay: provider.implementation?.display,
+            lifetime: provider.lifetime,
+            isResource: provider.isResource,
+            location: _publicLocation(provider.location),
+            dependencyIds: dependencyIds,
+          ),
+        );
+      }
+
+      graphModules.add(
+        BetterEffectGraphModule(
+          id: module.id,
+          name: module.name,
+          location: _publicLocation(module.location),
+          isComplete: _isCompleteRoot(module),
+          isExecutionOverlay: executionModuleIds.contains(module.id),
+          isOverride: module.isOverride,
+          rootKind: rootKinds[module.id],
+          baseModuleId: module.baseModuleId,
+          includedModuleIds: module.includedModuleIds.toList()..sort(),
+          declaredProviderIds: declaredProviderIds,
+          providerIds: providerIds,
+        ),
+      );
+    }
+
+    graphProviders.sort((left, right) => left.id.compareTo(right.id));
+    graphDependencies.sort((left, right) => left.id.compareTo(right.id));
+    final services = graphServices.values.toList()
+      ..sort((left, right) => left.id.compareTo(right.id));
+    final graphDiagnostics =
+        diagnostics
+            .map(
+              (diagnostic) => BetterEffectGraphDiagnostic(
+                code: diagnostic.code,
+                message: diagnostic.message,
+                severity: BetterEffectGraphDiagnosticSeverity.values.byName(
+                  diagnostic.severity.name,
+                ),
+                location: BetterEffectGraphLocation(
+                  path: diagnostic.path,
+                  line: diagnostic.line,
+                  column: diagnostic.column,
+                  length: diagnostic.length,
+                ),
+              ),
+            )
+            .toList()
+          ..sort((left, right) => left.location.compareTo(right.location));
+
+    final unreachableModules = _unreachableGraphModules(rootKinds);
+    final unreachableProviders =
+        graphProviders
+            .where((provider) => unreachableModules.contains(provider.moduleId))
+            .map((provider) => provider.id)
+            .toList()
+          ..sort();
+
+    return BetterEffectGraph(
+      projectName: p.basename(rootPath),
+      rootPath: rootPath,
+      rootModuleIds: rootKinds.keys.toList()..sort(),
+      modules: graphModules,
+      services: services,
+      providers: graphProviders,
+      dependencies: graphDependencies,
+      diagnostics: graphDiagnostics,
+      unreachableModuleIds: unreachableModules.toList()..sort(),
+      unreachableProviderIds: unreachableProviders,
+    );
+  }
+
+  Map<String, BetterEffectGraphRootKind> _graphRootKinds(
+    Set<String> moduleNames,
+  ) {
+    final referenced = _referencedModuleIds();
+    if (moduleNames.isNotEmpty) {
+      return <String, BetterEffectGraphRootKind>{
+        for (final module in modules.values)
+          if (moduleNames.contains(module.name))
+            module.id: BetterEffectGraphRootKind.selected,
+      };
+    }
+
+    final complete = modules.values
+        .where(
+          (module) =>
+              _isCompleteRoot(module) &&
+              !referenced.contains(module.id) &&
+              !executionModuleIds.contains(module.id),
+        )
+        .toList();
+    if (complete.isNotEmpty) {
+      return <String, BetterEffectGraphRootKind>{
+        for (final module in complete)
+          module.id: BetterEffectGraphRootKind.complete,
+      };
+    }
+
+    return <String, BetterEffectGraphRootKind>{
+      for (final module in modules.values)
+        if (!referenced.contains(module.id) &&
+            !executionModuleIds.contains(module.id))
+          module.id: BetterEffectGraphRootKind.inferred,
+    };
+  }
+
+  Set<String> _referencedModuleIds() {
+    final referenced = <String>{};
+    for (final module in modules.values) {
+      referenced.addAll(module.includedModuleIds);
+      final base = module.baseModuleId;
+      if (base != null) {
+        referenced.add(base);
+      }
+    }
+    return referenced;
+  }
+
+  Set<String> _unreachableGraphModules(
+    Map<String, BetterEffectGraphRootKind> rootKinds,
+  ) {
+    if (!rootKinds.values.contains(BetterEffectGraphRootKind.complete)) {
+      return const <String>{};
+    }
+
+    final reachable = <String>{};
+    void visit(String id) {
+      if (!reachable.add(id)) return;
+      final module = modules[id];
+      if (module == null) return;
+      final base = module.baseModuleId;
+      if (base != null) visit(base);
+      for (final included in module.includedModuleIds) {
+        visit(included);
+      }
+    }
+
+    for (final root in rootKinds.keys) {
+      visit(root);
+    }
+    for (final executionModule in executionModuleIds) {
+      visit(executionModule);
+    }
+
+    return modules.keys.toSet().difference(reachable);
+  }
+
+  void _flattenGraphModule(
+    _ModuleInfo module,
+    Map<String, ({_ProviderInfo provider, String declaredModuleId})> target,
+    Set<String> visiting,
+  ) {
+    if (!visiting.add(module.id)) return;
+    final baseId = module.baseModuleId;
+    if (baseId != null) {
+      final base = modules[baseId];
+      if (base != null) {
+        _flattenGraphModule(base, target, visiting);
+      }
+    }
+    for (final includedId in module.includedModuleIds) {
+      final included = modules[includedId];
+      if (included != null) {
+        _flattenGraphModule(included, target, visiting);
+      }
+    }
+    for (final provider in module.providers) {
+      target[provider.service.identity] = (
+        provider: provider,
+        declaredModuleId: module.id,
+      );
+    }
+    visiting.remove(module.id);
+  }
+
+  void _registerGraphService(
+    Map<String, BetterEffectGraphService> services,
+    _ServiceRef service,
+  ) {
+    services.putIfAbsent(
+      service.identity,
+      () => BetterEffectGraphService(
+        id: service.identity,
+        display: service.display,
+        typeId: service.baseIdentity,
+        keyId: service.keyId,
+        keyName: _graphKeyName(service.keyId),
+      ),
+    );
+  }
+
+  String? _graphKeyName(String keyId) {
+    if (keyId == '<default>') return null;
+    if (keyId.startsWith('source:')) {
+      return keyId.substring('source:'.length);
+    }
+    final hash = keyId.lastIndexOf('#');
+    final value = hash < 0 ? keyId : keyId.substring(hash + 1);
+    final dot = value.lastIndexOf('.');
+    return dot < 0 ? value : value.substring(dot + 1);
+  }
+
+  BetterEffectGraphLocation _publicLocation(_SourceLocation location) {
+    return BetterEffectGraphLocation(
+      path: p.relative(location.path, from: rootPath),
+      line: location.line,
+      column: location.column,
+      length: location.length,
+    );
+  }
+
+  BetterEffectGraphLocation? _publicLocationOrNull(_SourceLocation? location) {
+    return location == null ? null : _publicLocation(location);
   }
 
   Iterable<GraphDiagnostic> _validateModule(
@@ -843,6 +1195,32 @@ final class _UnitCollector extends RecursiveAstVisitor<void> {
     }
   }
 
+  BetterEffectProviderLifetime _bindingLifetime(BindingCall binding) {
+    return switch (binding.name) {
+      'factory' => BetterEffectProviderLifetime.factory,
+      'singleton' => BetterEffectProviderLifetime.singleton,
+      'lazySingleton' => BetterEffectProviderLifetime.lazySingleton,
+      'instance' => BetterEffectProviderLifetime.instance,
+      'resource' => BetterEffectProviderLifetime.resource,
+      'provide' => _provideLifetime(binding),
+      _ => BetterEffectProviderLifetime.unknown,
+    };
+  }
+
+  BetterEffectProviderLifetime _provideLifetime(BindingCall binding) {
+    final source = binding.namedArgument('lifetime')?.toSource();
+    if (source == null || source.endsWith('.lazySingleton')) {
+      return BetterEffectProviderLifetime.lazySingleton;
+    }
+    if (source.endsWith('.factory')) {
+      return BetterEffectProviderLifetime.factory;
+    }
+    if (source.endsWith('.singleton')) {
+      return BetterEffectProviderLifetime.singleton;
+    }
+    return BetterEffectProviderLifetime.unknown;
+  }
+
   _ProviderInfo? _providerFrom(BindingCall binding) {
     final serviceType = binding.serviceType;
     if (serviceType == null) return null;
@@ -896,6 +1274,7 @@ final class _UnitCollector extends RecursiveAstVisitor<void> {
           : _ServiceRef.fromType(implementationType),
       constructorDependencies: constructorDependencies,
       inlineDependencies: inlineDependencies,
+      lifetime: _bindingLifetime(binding),
       isResource: binding.name == 'resource',
       location: _location(binding.nameNode.offset, binding.nameNode.length),
       typeSystem: result.typeSystem,
@@ -1037,6 +1416,7 @@ final class _ProviderInfo {
     required this.implementation,
     required this.constructorDependencies,
     required this.inlineDependencies,
+    required this.lifetime,
     required this.isResource,
     required this.location,
     required this.typeSystem,
@@ -1046,6 +1426,7 @@ final class _ProviderInfo {
   final _ServiceRef? implementation;
   final Set<_ServiceRef> constructorDependencies;
   final Set<_ServiceRef> inlineDependencies;
+  final BetterEffectProviderLifetime lifetime;
   final bool isResource;
   final _SourceLocation location;
   final TypeSystem typeSystem;
