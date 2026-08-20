@@ -79,7 +79,7 @@ observe the same execution declaratively while imperative code awaits
 
 - Dart 3.10 or newer;
 - Flutter 3.38 or newer;
-- [`better_effect`](https://pub.dev/packages/better_effect) 0.2.x.
+- [`better_effect`](https://pub.dev/packages/better_effect) 0.3.x.
 
 The package re-exports `better_effect`, so most applications need
 only one import:
@@ -98,7 +98,7 @@ Or add it manually:
 
 ```yaml
 dependencies:
-  better_effect_flutter: ^0.2.0
+  better_effect_flutter: ^0.3.0
 ```
 
 During local monorepo development, this repository uses an ignored

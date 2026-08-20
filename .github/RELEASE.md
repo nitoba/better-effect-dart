@@ -13,9 +13,9 @@ not move or reuse a release tag after pushing it.
 
 | Package | `pubspec.yaml` version | Tag | pub.dev tag pattern |
 | --- | --- | --- | --- |
-| `better_effect` | `0.2.0` | `better_effect-v0.2.0` | `better_effect-v{{version}}` |
-| `better_effect_flutter` | `0.2.0` | `better_effect_flutter-v0.2.0` | `better_effect_flutter-v{{version}}` |
-| `better_effect_analyzer` | `0.2.0` | `better_effect_analyzer-v0.2.0` | `better_effect_analyzer-v{{version}}` |
+| `better_effect` | `0.3.0` | `better_effect-v0.3.0` | `better_effect-v{{version}}` |
+| `better_effect_flutter` | `0.3.0` | `better_effect_flutter-v0.3.0` | `better_effect_flutter-v{{version}}` |
+| `better_effect_analyzer` | `0.3.0` | `better_effect_analyzer-v0.3.0` | `better_effect_analyzer-v{{version}}` |
 
 ## One-time pub.dev setup
 
@@ -42,8 +42,8 @@ pushing a release tag, and add any approval rules you want.
 For example:
 
 ```bash
-git tag better_effect-v0.2.0
-git push origin better_effect-v0.2.0
+git tag better_effect-v0.3.0
+git push origin better_effect-v0.3.0
 ```
 
 The other two workflows do not run. A failed or delayed release of one package

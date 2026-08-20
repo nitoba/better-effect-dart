@@ -51,10 +51,10 @@ The graph CLI adds whole-project checks for:
 
 - Dart SDK 3.10 or newer;
 - Flutter 3.38 or newer when analyzing a Flutter application;
-- `better_effect` 0.2.x for the symbols being checked;
+- `better_effect` 0.3.x for the symbols being checked;
 - analyzer 12.x tooling.
 
-Version 0.2.0 continues to target the analyzer line used by Flutter SDKs that
+Version 0.3.0 continues to target the analyzer line used by Flutter SDKs that
 pin `meta` to 1.18.0:
 
 ```yaml
@@ -80,7 +80,7 @@ Or add it manually:
 
 ```yaml
 dev_dependencies:
-  better_effect_analyzer: ^0.2.0
+  better_effect_analyzer: ^0.3.0
 ```
 
 The Analysis Server plugin is configured from the project's top-level
@@ -96,7 +96,7 @@ include: package:flutter_lints/flutter.yaml
 
 plugins:
   better_effect_analyzer:
-    version: ^0.2.0
+    version: ^0.3.0
     diagnostics:
       repository_requests_repository: true
       viewmodel_requests_service: true
@@ -142,7 +142,7 @@ Add `better_effect_analyzer` to `dev_dependencies` when you also want to run
 
 ```yaml
 dev_dependencies:
-  better_effect_analyzer: ^0.2.0
+  better_effect_analyzer: ^0.3.0
 ```
 
 The analyzer package should not be added to `dependencies` and should never be

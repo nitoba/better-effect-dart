@@ -1,4 +1,4 @@
-## Unreleased
+## 0.3.0
 
 - The graph checker now recognizes Modules passed directly to
   `Runtime.runWith`, `runExitWith`, and `executeWith` as execution overlays.

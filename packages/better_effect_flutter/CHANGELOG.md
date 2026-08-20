@@ -1,4 +1,4 @@
-## Unreleased
+## 0.3.0
 
 - Added `package:better_effect_flutter/testing.dart`, re-exporting the core
   testing toolkit with Flutter-specific Command and widget helpers.
