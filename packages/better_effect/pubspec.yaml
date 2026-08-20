@@ -16,6 +16,7 @@ environment:
 
 dependencies:
   auto_injector: ^2.2.0
+  matcher: ^0.12.17
   result_dart: ^2.2.0
 
 dev_dependencies:

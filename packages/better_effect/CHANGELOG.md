@@ -24,8 +24,13 @@
 - Added service resolution paths, execution-scoped Module event propagation,
   Flutter Command label verification, observer-ordering tests, and a standalone
   no-observer overhead benchmark.
-- Added `Module.complete` as a runtime-neutral marker for application composition
-  roots validated by `better_effect_analyzer`.
+- Added `package:better_effect/testing.dart` with `TestRuntime`, typed Exit
+  matchers/extractors, deterministic gates and signals, ordered event recording,
+  Runtime event waits, and active-execution leak assertions.
+- Added a public `ResolverBackend` compatibility kit covering lifetimes, keys,
+  constructor resolution, missing/circular dependencies, duplicate and
+  post-commit registration, startup cleanup, close semantics, overlays, and
+  optional native disposal probes.
 
 ## 0.2.0
 
