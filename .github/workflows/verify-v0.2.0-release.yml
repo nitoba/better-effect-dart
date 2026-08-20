@@ -1,0 +1,129 @@
+name: Verify v0.2.0 release
+
+on:
+  push:
+    branches:
+      - release/verify-v0.2.0
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  verify:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPOSITORY: nitoba/better-effect-dart
+
+    steps:
+      - name: Checkout verification branch
+        uses: actions/checkout@v4
+        with:
+          ref: release/verify-v0.2.0
+
+      - name: Wait for publish workflows and pub.dev visibility
+        run: |
+          python3 - <<'PY'
+          import json
+          import subprocess
+          import time
+          import urllib.request
+          from pathlib import Path
+
+          repository = 'nitoba/better-effect-dart'
+          releases = [
+              {
+                  'package': 'better_effect',
+                  'workflow': 'publish-better-effect.yml',
+                  'tag': 'better_effect-v0.2.0',
+              },
+              {
+                  'package': 'better_effect_analyzer',
+                  'workflow': 'publish-better-effect-analyzer.yml',
+                  'tag': 'better_effect_analyzer-v0.2.0',
+              },
+              {
+                  'package': 'better_effect_flutter',
+                  'workflow': 'publish-better-effect-flutter.yml',
+                  'tag': 'better_effect_flutter-v0.2.0',
+              },
+          ]
+
+          def gh_json(*args):
+              output = subprocess.check_output(
+                  ['gh', *args],
+                  text=True,
+              )
+              return json.loads(output)
+
+          def latest_run(workflow, tag):
+              runs = gh_json(
+                  'run', 'list',
+                  '--repo', repository,
+                  '--workflow', workflow,
+                  '--limit', '20',
+                  '--json', 'databaseId,status,conclusion,headBranch,event,url,createdAt',
+              )
+              matching = [
+                  run for run in runs
+                  if run.get('headBranch') == tag
+                  or run.get('event') == 'workflow_dispatch'
+              ]
+              return matching[0] if matching else None
+
+          deadline = time.time() + 20 * 60
+          while time.time() < deadline:
+              pending = False
+              for item in releases:
+                  item['run'] = latest_run(item['workflow'], item['tag'])
+                  run = item['run']
+                  if run is None or run.get('status') != 'completed':
+                      pending = True
+              if not pending:
+                  break
+              time.sleep(10)
+
+          for item in releases:
+              item['run'] = latest_run(item['workflow'], item['tag'])
+
+          pub_deadline = time.time() + 5 * 60
+          while time.time() < pub_deadline:
+              all_visible = True
+              for item in releases:
+                  try:
+                      with urllib.request.urlopen(
+                          f"https://pub.dev/api/packages/{item['package']}",
+                          timeout=20,
+                      ) as response:
+                          payload = json.load(response)
+                      item['pubLatest'] = payload['latest']['version']
+                  except Exception as error:
+                      item['pubLatest'] = None
+                      item['pubError'] = str(error)
+                  if item.get('pubLatest') != '0.2.0':
+                      all_visible = False
+              if all_visible:
+                  break
+              time.sleep(10)
+
+          report = {
+              'targetVersion': '0.2.0',
+              'generatedAt': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+              'packages': releases,
+          }
+          Path('.release-v0.2.0-status.json').write_text(
+              json.dumps(report, indent=2, sort_keys=True) + '\n'
+          )
+          print(json.dumps(report, indent=2, sort_keys=True))
+          PY
+
+      - name: Commit verification report
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add .release-v0.2.0-status.json
+          git commit -m "chore(release): record v0.2.0 publication status"
+          git push origin HEAD:release/verify-v0.2.0
