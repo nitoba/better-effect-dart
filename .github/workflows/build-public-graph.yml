@@ -1,23 +1,27 @@
 name: Build public graph integration
 
 on:
-  push:
+  pull_request:
     branches:
-      - automation/public-graph-build
+      - agent/module-complete-lifecycle-diagnostics
+      - main
 
 permissions:
   contents: write
 
 jobs:
   build:
-    if: github.actor != 'github-actions[bot]'
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'agent/public-graph-inspection' &&
+      github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout staging branch
+      - name: Checkout feature branch
         uses: actions/checkout@v4
         with:
-          ref: automation/public-graph-build
+          ref: agent/public-graph-inspection
 
       - name: Integrate public graph with checker
         run: |
@@ -78,4 +82,4 @@ jobs:
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add packages/better_effect_analyzer
           git commit -m "feat(graph): integrate public graph and inspection CLI"
-          git push origin HEAD:automation/public-graph-build
+          git push origin HEAD:agent/public-graph-inspection
