@@ -1,0 +1,144 @@
+name: Tag and publish v0.2.0
+
+on:
+  push:
+    branches:
+      - release/tag-v0.2.0
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  release:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TARGET_SHA: a7a779fe9b9b5badcafa53530b46968d181e42ed
+      REPOSITORY: nitoba/better-effect-dart
+
+    steps:
+      - name: Checkout release commit
+        uses: actions/checkout@v4
+        with:
+          ref: a7a779fe9b9b5badcafa53530b46968d181e42ed
+          fetch-depth: 0
+
+      - name: Verify release versions
+        run: |
+          test "$(awk '/^version:/{print $2; exit}' packages/better_effect/pubspec.yaml)" = "0.2.0"
+          test "$(awk '/^version:/{print $2; exit}' packages/better_effect_flutter/pubspec.yaml)" = "0.2.0"
+          test "$(awk '/^version:/{print $2; exit}' packages/better_effect_analyzer/pubspec.yaml)" = "0.2.0"
+          grep -qx '  better_effect: ^0.2.0' packages/better_effect_flutter/pubspec.yaml
+
+      - name: Create immutable package tags
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+
+          create_tag() {
+            local tag="$1"
+            local message="$2"
+
+            if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null 2>&1; then
+              git fetch --force origin "refs/tags/$tag:refs/tags/$tag"
+              local actual
+              actual="$(git rev-list -n 1 "$tag")"
+              if [ "$actual" != "$TARGET_SHA" ]; then
+                echo "Tag $tag already exists at $actual, expected $TARGET_SHA" >&2
+                exit 1
+              fi
+              echo "Tag $tag already points to the release commit."
+              return
+            fi
+
+            git tag -a "$tag" "$TARGET_SHA" -m "$message"
+            git push origin "refs/tags/$tag"
+          }
+
+          create_tag better_effect-v0.2.0 'Release better_effect 0.2.0'
+          create_tag better_effect_analyzer-v0.2.0 'Release better_effect_analyzer 0.2.0'
+          create_tag better_effect_flutter-v0.2.0 'Release better_effect_flutter 0.2.0'
+
+      - name: Publish core and analyzer
+        run: |
+          dispatch_and_wait() {
+            local workflow="$1"
+            local ref="$2"
+            local previous=""
+            local run_id=""
+
+            previous="$(gh run list \
+              --repo "$REPOSITORY" \
+              --workflow "$workflow" \
+              --event workflow_dispatch \
+              --limit 1 \
+              --json databaseId \
+              --jq '.[0].databaseId // empty')"
+
+            gh workflow run "$workflow" --repo "$REPOSITORY" --ref "$ref"
+
+            for _ in $(seq 1 60); do
+              run_id="$(gh run list \
+                --repo "$REPOSITORY" \
+                --workflow "$workflow" \
+                --event workflow_dispatch \
+                --limit 1 \
+                --json databaseId \
+                --jq '.[0].databaseId // empty')"
+
+              if [ -n "$run_id" ] && [ "$run_id" != "$previous" ]; then
+                break
+              fi
+              sleep 2
+            done
+
+            if [ -z "$run_id" ] || [ "$run_id" = "$previous" ]; then
+              echo "Could not locate the workflow_dispatch run for $workflow at $ref" >&2
+              exit 1
+            fi
+
+            gh run watch "$run_id" --repo "$REPOSITORY" --exit-status
+          }
+
+          dispatch_and_wait publish-better-effect.yml better_effect-v0.2.0
+          dispatch_and_wait publish-better-effect-analyzer.yml better_effect_analyzer-v0.2.0
+
+      - name: Publish Flutter after the core is available
+        run: |
+          previous="$(gh run list \
+            --repo "$REPOSITORY" \
+            --workflow publish-better-effect-flutter.yml \
+            --event workflow_dispatch \
+            --limit 1 \
+            --json databaseId \
+            --jq '.[0].databaseId // empty')"
+
+          gh workflow run publish-better-effect-flutter.yml \
+            --repo "$REPOSITORY" \
+            --ref better_effect_flutter-v0.2.0
+
+          run_id=""
+          for _ in $(seq 1 60); do
+            run_id="$(gh run list \
+              --repo "$REPOSITORY" \
+              --workflow publish-better-effect-flutter.yml \
+              --event workflow_dispatch \
+              --limit 1 \
+              --json databaseId \
+              --jq '.[0].databaseId // empty')"
+
+            if [ -n "$run_id" ] && [ "$run_id" != "$previous" ]; then
+              break
+            fi
+            sleep 2
+          done
+
+          if [ -z "$run_id" ] || [ "$run_id" = "$previous" ]; then
+            echo 'Could not locate the Flutter publish workflow run.' >&2
+            exit 1
+          fi
+
+          gh run watch "$run_id" --repo "$REPOSITORY" --exit-status
