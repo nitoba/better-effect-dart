@@ -44,16 +44,17 @@ The graph CLI adds whole-project checks for:
 - dependency cycles;
 - recursive Module composition;
 - explicitly requested Modules that do not exist;
-- duplicate or incompatible providers after Module composition.
+- duplicate or incompatible providers after Module composition;
+- resources that require another resource declared later during startup.
 
 ## Requirements and compatibility
 
 - Dart SDK 3.10 or newer;
 - Flutter 3.38 or newer when analyzing a Flutter application;
-- `better_effect` 0.1.x for the symbols being checked;
+- `better_effect` 0.2.x for the symbols being checked;
 - analyzer 12.x tooling.
 
-Version 0.1.3 intentionally targets the analyzer line used by Flutter SDKs that
+Version 0.2.0 continues to target the analyzer line used by Flutter SDKs that
 pin `meta` to 1.18.0:
 
 ```yaml
@@ -79,7 +80,7 @@ Or add it manually:
 
 ```yaml
 dev_dependencies:
-  better_effect_analyzer: ^0.1.3
+  better_effect_analyzer: ^0.2.0
 ```
 
 The Analysis Server plugin is configured from the project's top-level
@@ -95,7 +96,7 @@ include: package:flutter_lints/flutter.yaml
 
 plugins:
   better_effect_analyzer:
-    version: ^0.1.3
+    version: ^0.2.0
     diagnostics:
       repository_requests_repository: true
       viewmodel_requests_service: true
@@ -141,7 +142,7 @@ Add `better_effect_analyzer` to `dev_dependencies` when you also want to run
 
 ```yaml
 dev_dependencies:
-  better_effect_analyzer: ^0.1.3
+  better_effect_analyzer: ^0.2.0
 ```
 
 The analyzer package should not be added to `dependencies` and should never be
@@ -452,6 +453,12 @@ Example:
 error   lib/config/app_module.dart:12:3 [missing_service]
 Provider 'UserRepository' requires 'Database', but Module 'appModule' doesn't provide it.
 ```
+
+#### `resource_dependency_declared_after_provider`
+
+This reports a direct or transitive startup dependency on a resource that is
+declared later in the flattened Module. Move the dependency earlier or reorder
+the owning resource so acquisition order matches the dependency graph.
 
 #### `dependency_cycle`
 

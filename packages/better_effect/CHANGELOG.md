@@ -1,4 +1,4 @@
-## Unreleased
+## 0.2.0
 
 - Added owned `Scope.make()` values with public child Scope, finalizer,
   acquisition, and close operations.

@@ -79,7 +79,7 @@ observe the same execution declaratively while imperative code awaits
 
 - Dart 3.10 or newer;
 - Flutter 3.38 or newer;
-- [`better_effect`](https://pub.dev/packages/better_effect) 0.1.x.
+- [`better_effect`](https://pub.dev/packages/better_effect) 0.2.x.
 
 The package re-exports `better_effect`, so most applications need
 only one import:
@@ -98,7 +98,7 @@ Or add it manually:
 
 ```yaml
 dependencies:
-  better_effect_flutter: ^0.1.1
+  better_effect_flutter: ^0.2.0
 ```
 
 During local monorepo development, this repository uses an ignored
@@ -490,8 +490,9 @@ uploads, or toggles where every user intent matters.
 
 ## Cancellation, retry, and reset
 
-Dart Futures are not generally cancellable. `command.cancel()` changes
-the Command immediately, but it cannot forcefully stop arbitrary work underneath:
+Dart Futures are not generally cancellable. `command.cancel()` publishes
+interruption immediately and requests cooperative cancellation through the core
+`EffectExecution`. Physical work remains owned by the Runtime until it finishes:
 
 ```dart
 command.cancel();
@@ -504,8 +505,10 @@ Cancellation:
 - ignores the eventual stale completion;
 - interrupts queued executions by default.
 
-Provide `onCancel` to signal a cooperative API such as a Dio token,
-download manager, or isolate:
+Inside an Effect, observe `use.cancellation` or call
+`use.cancellation.throwIfCancelled()` at a cooperative boundary. Provide
+`onCancel` only as an adapter for APIs with their own cancellation protocol,
+such as a Dio token, download manager, or isolate:
 
 ```dart
 upload = commandWithInput(
@@ -581,8 +584,18 @@ The widget shows loading until the Runtime starts, exposes a retry callback
 after startup failure, and closes the Runtime when it is disposed.
 `backendFactory` creates a fresh resolver for every start/retry.
 Change `restartKey` to intentionally restart an otherwise identical
-Module. `closeRuntimeOnDetach` controls whether the Runtime also
-closes when the Flutter view detaches.
+Module. Use `lifecyclePolicy` to configure widget disposal, application
+exit, cooperative interruption, and the shutdown grace period:
+
+```dart
+BetterEffectLifecyclePolicy.application(
+  gracePeriod: const Duration(seconds: 2),
+  interruptExecutionsBeforeClose: true,
+)
+```
+
+The former `closeRuntimeOnDetach` parameter remains temporarily available as
+a deprecated migration path.
 
 ### `BetterEffectProvider`
 
@@ -595,8 +608,9 @@ BetterEffectProvider(
 )
 ```
 
-The default constructor owns and closes the Runtime. Use `.value` when
-another owner controls its lifecycle:
+The default constructor creates an application-owned boundary. Set
+`ownership: BetterEffectRuntimeOwnership.widget` for a feature subtree, and
+use `.value` when another boundary controls the Runtime lifecycle:
 
 ```dart
 BetterEffectProvider.value(
