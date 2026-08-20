@@ -24,7 +24,7 @@ void main() {
 
       expect((await running).isRunning, isTrue);
       gate.complete(42);
-      expect((await execution).valueOrNull, 42);
+      expect(expectExitSuccess(await execution), 42);
       expect((await success).value, 42);
       expect(probe.states, hasLength(3));
       probe.expectStateTypes(<Type>[
