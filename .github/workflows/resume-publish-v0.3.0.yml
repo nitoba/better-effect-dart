@@ -1,0 +1,202 @@
+name: Resume v0.3.0 package publication
+
+on:
+  push:
+    branches:
+      - automation/resume-publish-v0.3.0
+
+permissions:
+  actions: write
+  contents: write
+  issues: write
+
+jobs:
+  publish:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: 0.3.0
+      MAIN_SHA: 4d09d95114b7f02160e0cb337ba5df923b4b14fd
+
+    steps:
+      - name: Checkout release commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.MAIN_SHA }}
+          fetch-depth: 0
+
+      - name: Verify tags and GitHub Releases
+        run: |
+          set -euo pipefail
+
+          for package in \
+            better_effect \
+            better_effect_analyzer \
+            better_effect_flutter; do
+            tag="${package}-v${VERSION}"
+
+            git ls-remote --exit-code --tags origin "refs/tags/${tag}" >/dev/null
+
+            if ! gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              gh release create "$tag" \
+                --repo "$GITHUB_REPOSITORY" \
+                --target "$MAIN_SHA" \
+                --title "${package} ${VERSION}" \
+                --generate-notes
+            fi
+          done
+
+      - name: Publish missing packages and verify pub.dev
+        run: |
+          set -Eeuo pipefail
+
+          current_package='initialization'
+          current_run_id=''
+
+          report_failure() {
+            local status=$?
+            if [ "$status" -eq 0 ]; then
+              return
+            fi
+
+            local run_note='No child publication run was discovered.'
+            if [ -n "$current_run_id" ]; then
+              run_note="Child run: https://github.com/${GITHUB_REPOSITORY}/actions/runs/${current_run_id}"
+            fi
+
+            gh issue comment 3 \
+              --repo "$GITHUB_REPOSITORY" \
+              --body "The v0.3.0 publication resume failed while processing **${current_package}**. ${run_note} The package tags and GitHub Releases were preserved, and the milestone remains open until publication is verified." \
+              || true
+          }
+          trap report_failure ERR
+
+          package_is_visible() {
+            local package="$1"
+            local payload
+            payload="$(curl -fsSL "https://pub.dev/api/packages/${package}")" || return 1
+            jq -e --arg version "$VERSION" \
+              '.versions | any(.version == $version)' \
+              <<<"$payload" >/dev/null
+          }
+
+          discover_dispatched_run() {
+            local workflow="$1"
+            local tag="$2"
+            local since="$3"
+            local response
+
+            response="$(
+              gh api \
+                "repos/${GITHUB_REPOSITORY}/actions/workflows/${workflow}/runs?event=workflow_dispatch&per_page=30"
+            )"
+
+            jq -r \
+              --arg tag "$tag" \
+              --arg sha "$MAIN_SHA" \
+              --arg since "$since" \
+              '[.workflow_runs[]
+                | select(.created_at >= $since)
+                | select(.head_branch == $tag or .head_sha == $sha)]
+               | sort_by(.created_at)
+               | last
+               | .id // empty' \
+              <<<"$response"
+          }
+
+          dispatch_and_wait() {
+            local package="$1"
+            local workflow="$2"
+            local tag="${package}-v${VERSION}"
+            local since
+
+            current_package="$package"
+            current_run_id=''
+            since="$(date -u -d '3 seconds ago' '+%Y-%m-%dT%H:%M:%SZ')"
+
+            gh workflow run "$workflow" \
+              --repo "$GITHUB_REPOSITORY" \
+              --ref "$tag"
+
+            for attempt in $(seq 1 45); do
+              current_run_id="$(discover_dispatched_run "$workflow" "$tag" "$since")"
+              if [ -n "$current_run_id" ]; then
+                break
+              fi
+              sleep 2
+            done
+
+            if [ -z "$current_run_id" ]; then
+              echo "Could not discover the dispatched $workflow run for $tag." >&2
+              return 1
+            fi
+
+            echo "Watching ${package} publication run ${current_run_id}."
+            gh run watch "$current_run_id" \
+              --repo "$GITHUB_REPOSITORY" \
+              --exit-status
+          }
+
+          wait_for_pubdev() {
+            local package="$1"
+            current_package="$package"
+
+            for attempt in $(seq 1 90); do
+              if package_is_visible "$package"; then
+                echo "${package} ${VERSION} is visible on pub.dev."
+                return
+              fi
+              sleep 10
+            done
+
+            echo "${package} ${VERSION} did not become visible on pub.dev." >&2
+            return 1
+          }
+
+          publish_if_missing() {
+            local package="$1"
+            local workflow="$2"
+
+            current_package="$package"
+            if package_is_visible "$package"; then
+              echo "${package} ${VERSION} is already published; skipping dispatch."
+              return
+            fi
+
+            dispatch_and_wait "$package" "$workflow"
+            wait_for_pubdev "$package"
+          }
+
+          # better_effect_flutter resolves its hosted core dependency during the
+          # reusable workflow's publish dry-run, so core must be visible first.
+          publish_if_missing better_effect publish-better-effect.yml
+          publish_if_missing better_effect_analyzer publish-better-effect-analyzer.yml
+          publish_if_missing better_effect_flutter publish-better-effect-flutter.yml
+
+          for package in \
+            better_effect \
+            better_effect_analyzer \
+            better_effect_flutter; do
+            current_package="$package verification"
+            package_is_visible "$package"
+          done
+
+          trap - ERR
+
+      - name: Close milestone and record the completed release
+        run: |
+          set -euo pipefail
+
+          gh api \
+            --method PATCH \
+            "repos/${GITHUB_REPOSITORY}/milestones/2" \
+            -f state=closed >/dev/null
+
+          gh issue comment 3 \
+            --repo "$GITHUB_REPOSITORY" \
+            --body "Released **v0.3.0** on August 20, 2026.\n\nPublished package tags and GitHub Releases:\n- \`better_effect-v0.3.0\`\n- \`better_effect_analyzer-v0.3.0\`\n- \`better_effect_flutter-v0.3.0\`\n\nAll three versions are visible on pub.dev, and milestone **v0.3 — Context & Observability** is closed."
+
+      - name: Delete temporary automation branch
+        run: git push origin --delete automation/resume-publish-v0.3.0
