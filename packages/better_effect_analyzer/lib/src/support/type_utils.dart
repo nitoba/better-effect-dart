@@ -7,16 +7,36 @@ const betterEffectLibraryUri = 'package:better_effect/better_effect.dart';
 const betterEffectFlutterLibraryUri =
     'package:better_effect_flutter/better_effect_flutter.dart';
 
+/// Normalize a getter/setter reference back to the variable that declared it.
+///
+/// Top-level variables are read through accessor elements by the analyzer while
+/// their declarations expose variable elements. Using the inducing variable
+/// keeps Module identities stable between declarations and references.
+Element? canonicalElement(Element? element) {
+  final value = element?.baseElement;
+  if (value is PropertyAccessorElement) {
+    return value.variable.baseElement;
+  }
+  return value;
+}
+
+bool refersToSameElement(Element? first, Element? second) {
+  final left = canonicalElement(first);
+  final right = canonicalElement(second);
+  return left != null && identical(left, right);
+}
+
 String? elementLibraryUri(Element? element) {
-  return element?.library?.uri.toString();
+  return canonicalElement(element)?.library?.uri.toString();
 }
 
 String? elementIdentity(Element? element) {
-  final name = element?.name;
-  final library = elementLibraryUri(element);
+  final value = canonicalElement(element);
+  final name = value?.name;
+  final library = elementLibraryUri(value);
   if (name == null || library == null) return null;
 
-  final enclosingName = element?.enclosingElement?.name;
+  final enclosingName = value?.enclosingElement?.name;
   if (enclosingName == null || enclosingName.isEmpty) {
     return '$library#$name';
   }
@@ -39,7 +59,8 @@ String? baseTypeElementIdentity(DartType? type) {
 }
 
 bool isElementFromLibrary(Element? element, String name, String libraryUri) {
-  return element?.name == name && elementLibraryUri(element) == libraryUri;
+  final value = canonicalElement(element);
+  return value?.name == name && elementLibraryUri(value) == libraryUri;
 }
 
 bool isTypeFromLibrary(DartType? type, String name, String libraryUri) {
@@ -61,6 +82,10 @@ bool hierarchyContains(DartType? type, String name, String libraryUri) {
 
 bool isEffectType(DartType? type) {
   return isTypeFromLibrary(type, 'Effect', betterEffectLibraryUri);
+}
+
+bool isEffectExecutionType(DartType? type) {
+  return hierarchyContains(type, 'EffectExecution', betterEffectLibraryUri);
 }
 
 bool isEffectContextType(DartType? type) {
@@ -109,6 +134,27 @@ bool isEffectViewModelType(DartType? type) {
   return hierarchyContains(
     type,
     'EffectViewModel',
+    betterEffectFlutterLibraryUri,
+  );
+}
+
+bool isEffectCommandType(DartType? type) {
+  return hierarchyContains(
+        type,
+        'EffectCommandBase',
+        betterEffectFlutterLibraryUri,
+      ) ||
+      hierarchyContains(
+        type,
+        'EffectCommandDisposable',
+        betterEffectFlutterLibraryUri,
+      );
+}
+
+bool isEffectCommandOwnerType(DartType? type) {
+  return hierarchyContains(
+    type,
+    'EffectCommandOwner',
     betterEffectFlutterLibraryUri,
   );
 }

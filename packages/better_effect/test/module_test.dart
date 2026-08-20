@@ -103,6 +103,22 @@ void main() {
 
       expect(exit, isA<ExitDefect<int, Never>>());
     });
+
+    test('Module.complete has ordinary immutable Runtime behavior', () async {
+      final module = Module.complete([.provide<Counter>(CounterLive.new)]);
+
+      expect(module.bindings, hasLength(1));
+      expect(
+        () => module.bindings.add(.provide<Database>(DatabaseLive.new)),
+        throwsUnsupportedError,
+      );
+
+      final result = await module.run(
+        Effect<int, Never>.result((use) async => use<Counter>().next()),
+      );
+
+      expect(result.getOrNull(), 1);
+    });
   });
 
   group('overrides and keys', () {

@@ -8,7 +8,67 @@ import 'package:flutter/widgets.dart';
 
 export 'package:better_effect/better_effect.dart';
 
-abstract base class EffectViewModel extends ChangeNotifier {}
+abstract interface class EffectCommandDisposable {
+  bool get isDisposed;
+  void dispose();
+}
+
+abstract class EffectCommandBase<A extends Object, E extends Object>
+    implements EffectCommandDisposable {}
+
+final class EffectCommand0<A extends Object, E extends Object>
+    extends EffectCommandBase<A, E> {
+  EffectCommand0();
+}
+
+final class EffectCommand<I, A extends Object, E extends Object>
+    extends EffectCommandBase<A, E> {
+  EffectCommand();
+}
+
+final class EffectCommands {
+  EffectCommand0<A, E> call<A extends Object, E extends Object>(
+    Effect<A, E> Function() action,
+  ) => EffectCommand0<A, E>();
+
+  EffectCommand<I, A, E> withInput<I, A extends Object, E extends Object>(
+    Effect<A, E> Function(I input) action,
+  ) => EffectCommand<I, A, E>();
+}
+
+mixin EffectCommandOwner on ChangeNotifier {
+  T ownCommand<T extends EffectCommandDisposable>(T command) => command;
+}
+
+abstract class EffectViewModel extends ChangeNotifier
+    with EffectCommandOwner {
+  EffectViewModel([EffectCommands? commands])
+    : commands = commands ?? EffectCommands();
+  final EffectCommands commands;
+
+  EffectCommand0<A, E> command<A extends Object, E extends Object>(
+    Effect<A, E> Function() action,
+  ) => ownCommand(commands<A, E>(action));
+
+  EffectCommand<I, A, E>
+  commandWithInput<I, A extends Object, E extends Object>(
+    Effect<A, E> Function(I input) action,
+  ) => ownCommand(commands.withInput<I, A, E>(action));
+}
+
+final class BetterEffectProvider extends Widget {
+  BetterEffectProvider({required Runtime runtime, required Widget child});
+  BetterEffectProvider.value({required Runtime runtime, required Widget child});
+}
+
+final class BetterEffectBootstrap extends Widget {
+  BetterEffectBootstrap({required Module module, required Widget child});
+}
+
+Future<void> runBetterEffectApp({
+  required Module module,
+  required Widget app,
+}) async {}
 
 extension BetterEffectBuildContext on BuildContext {
   T readEffectService<T extends Object>() => throw UnimplementedError();
@@ -36,7 +96,7 @@ abstract interface class EffectContext<E extends Object> {
   });
   Future<R> acquire<R extends Object, F extends E>(
     Effect<R, F> acquisition, {
-    required FutureOr<void> Function(R) release,
+    required FutureOr<void> Function(R, Object) release,
   });
   Never fail<F extends E>(F error);
 }
@@ -55,6 +115,22 @@ final class Effect<A extends Object, E extends Object> {
   static Effect<T, Never> service<T extends Object>([
     ServiceKey<T>? key,
   ]) => Effect<T, Never>._();
+}
+
+sealed class Exit<A extends Object, E extends Object> {}
+
+abstract interface class EffectExecution<A extends Object, E extends Object> {
+  Future<Exit<A, E>> get exit;
+}
+
+final class Runtime {
+  Future<void> close() async {}
+  bool get isClosed => false;
+  Object get state => Object();
+
+  EffectExecution<A, E> execute<A extends Object, E extends Object>(
+    Effect<A, E> effect,
+  ) => throw UnimplementedError();
 }
 
 enum Lifetime { factory, singleton, lazySingleton }
@@ -90,7 +166,7 @@ sealed class Binding {
 
   static Binding resource<T extends Object>({
     required FutureOr<T> Function(Services) acquire,
-    required FutureOr<void> Function(T) release,
+    required FutureOr<void> Function(T, Object) release,
     ServiceKey<T>? key,
   }) => const _Binding();
 }
@@ -106,8 +182,10 @@ final class Services {
 
 final class Module {
   Module(Iterable<Binding> bindings);
+  factory Module.complete(Iterable<Binding> bindings) => Module(bindings);
   factory Module.merge(Iterable<Module> modules) => Module(const []);
   Module overrideWith(Iterable<Binding> overrides) => this;
+  Future<Runtime> start() async => Runtime();
 }
 ''';
 
@@ -116,7 +194,9 @@ library;
 
 abstract interface class Listenable {}
 
-class ChangeNotifier implements Listenable {}
+class ChangeNotifier implements Listenable {
+  void dispose() {}
+}
 
 abstract class BuildContext {}
 

@@ -4,6 +4,19 @@
   `Runtime.runWith`, `runExitWith`, and `executeWith` as execution overlays.
 - Execution Modules may declare requirements supplied by the root Runtime while
   retaining duplicate, compatibility, cycle, and local resource-order checks.
+- Added explicit `Module.complete` root discovery while retaining inferred roots
+  and CLI `--module` selection for existing projects.
+- Complete-root missing-service diagnostics now point to the composition root and
+  include the dependency path that reaches the missing service.
+- Added default lifecycle warnings for locally unowned Runtimes and discarded
+  `EffectExecution` handles.
+- Added opt-in lints for unowned Flutter Commands, local Runtime use after close,
+  and visible application roots not yet marked with `Module.complete`.
+- Added safe quick fixes for complete-root migration, observing or returning an
+  execution Exit, local Runtime try/finally ownership, and local Command
+  ownership.
+- The graph CLI now emits the same lifecycle codes and messages as the IDE plugin,
+  including standard local and file-level suppression support.
 
 ## 0.2.0
 

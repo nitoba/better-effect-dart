@@ -10,6 +10,7 @@ import 'package:analyzer/dart/element/type_system.dart';
 import 'package:path/path.dart' as p;
 
 import '../support/invocation.dart';
+import '../support/lifecycle_analysis.dart';
 import '../support/type_utils.dart';
 
 /// Severity used by project-wide graph diagnostics.
@@ -163,6 +164,7 @@ final class BetterEffectGraphChecker {
 
     final collection = AnalysisContextCollection(includedPaths: includedPaths);
     final index = _ProjectIndex(rootPath);
+    final lifecycleDiagnostics = <GraphDiagnostic>[];
 
     try {
       for (final context in collection.contexts) {
@@ -174,11 +176,30 @@ final class BetterEffectGraphChecker {
           final result = await context.currentSession.getResolvedUnit(filePath);
           if (result is ResolvedUnitResult) {
             index.addUnit(result);
+            for (final finding in collectLifecycleFindings(result)) {
+              final location = result.lineInfo.getLocation(finding.node.offset);
+              lifecycleDiagnostics.add(
+                GraphDiagnostic(
+                  code: finding.code,
+                  message: finding.message,
+                  path: p.relative(result.path, from: rootPath),
+                  line: location.lineNumber,
+                  column: location.columnNumber,
+                  length: finding.node.length,
+                  severity: finding.severity == LifecycleFindingSeverity.warning
+                      ? GraphDiagnosticSeverity.warning
+                      : GraphDiagnosticSeverity.info,
+                ),
+              );
+            }
           }
         }
       }
 
-      return GraphCheckResult(index.validate(moduleNames: options.moduleNames));
+      return GraphCheckResult(<GraphDiagnostic>[
+        ...index.validate(moduleNames: options.moduleNames),
+        ...lifecycleDiagnostics,
+      ]);
     } finally {
       await collection.dispose();
     }
@@ -233,9 +254,21 @@ final class _ProjectIndex {
       if (base != null) referencedModules.add(base);
     }
 
+    final explicitRoots = modules.values.where(
+      (module) =>
+          _isCompleteRoot(module) &&
+          !referencedModules.contains(module.id) &&
+          !executionModuleIds.contains(module.id),
+    );
+    final hasExplicitRoots = explicitRoots.isNotEmpty;
     final roots = modules.values.where((module) {
       if (moduleNames.isNotEmpty) {
         return moduleNames.contains(module.name);
+      }
+      if (hasExplicitRoots) {
+        return _isCompleteRoot(module) &&
+            !referencedModules.contains(module.id) &&
+            !executionModuleIds.contains(module.id);
       }
       return !referencedModules.contains(module.id) &&
           !executionModuleIds.contains(module.id);
@@ -263,6 +296,7 @@ final class _ProjectIndex {
     _ModuleInfo root, {
     bool allowExternalRequirements = false,
   }) sync* {
+    final completeRoot = _isCompleteRoot(root);
     final flattened = <String, _ProviderInfo>{};
     final expansionStack = <String>{};
 
@@ -331,7 +365,8 @@ final class _ProjectIndex {
 
       for (final dependency in _providerDependencies(provider)) {
         if (!flattened.containsKey(dependency.identity) &&
-            !allowExternalRequirements) {
+            !allowExternalRequirements &&
+            !completeRoot) {
           yield _diagnostic(
             code: 'missing_service',
             message:
@@ -344,8 +379,83 @@ final class _ProjectIndex {
       }
     }
 
+    if (completeRoot && !allowExternalRequirements) {
+      yield* _findCompleteRootMissingServices(root, flattened);
+    }
+
     yield* _validateResourceStartupOrder(root, flattened);
     yield* _findCycles(root, flattened);
+  }
+
+  bool _isCompleteRoot(_ModuleInfo module, [Set<String>? visiting]) {
+    if (module.isComplete) return true;
+
+    final baseId = module.baseModuleId;
+    if (baseId == null) return false;
+
+    final seen = visiting ?? <String>{};
+    if (!seen.add(module.id)) return false;
+
+    final base = modules[baseId];
+    return base != null && _isCompleteRoot(base, seen);
+  }
+
+  Iterable<GraphDiagnostic> _findCompleteRootMissingServices(
+    _ModuleInfo root,
+    Map<String, _ProviderInfo> providers,
+  ) sync* {
+    final referenced = <String>{};
+    for (final provider in providers.values) {
+      for (final dependency in _providerDependencies(provider)) {
+        if (providers.containsKey(dependency.identity)) {
+          referenced.add(dependency.identity);
+        }
+      }
+    }
+
+    final entries = providers.keys
+        .where((identity) => !referenced.contains(identity))
+        .toList();
+    if (entries.isEmpty) entries.addAll(providers.keys);
+
+    final queue = <List<_ServiceRef>>[
+      for (final entry in entries) <_ServiceRef>[providers[entry]!.service],
+    ];
+    final visitedPaths = <String>{};
+    final emittedMissing = <String>{};
+
+    while (queue.isNotEmpty) {
+      final path = queue.removeAt(0);
+      final current = providers[path.last.identity];
+      if (current == null) continue;
+
+      final signature = path.map((item) => item.identity).join(' -> ');
+      if (!visitedPaths.add(signature)) continue;
+
+      for (final dependency in _providerDependencies(current)) {
+        final nextPath = <_ServiceRef>[...path, dependency];
+        final target = providers[dependency.identity];
+        if (target == null) {
+          if (!emittedMissing.add(dependency.identity)) continue;
+          final displayPath = nextPath
+              .map((service) => service.display)
+              .join(' -> ');
+          yield _diagnostic(
+            code: 'missing_service',
+            message:
+                "Complete Module '${root.name}' is incomplete. "
+                "Dependency path: $displayPath reaches missing service "
+                "'${dependency.display}'.",
+            location: root.location,
+          );
+          continue;
+        }
+
+        if (!path.any((item) => item.identity == target.service.identity)) {
+          queue.add(<_ServiceRef>[...path, target.service]);
+        }
+      }
+    }
   }
 
   Set<_ServiceRef> _providerDependencies(_ProviderInfo provider) {
@@ -609,11 +719,11 @@ final class _UnitCollector extends RecursiveAstVisitor<void> {
         _moduleDeclarationFor(expression),
         expression,
         isOverride: true,
-        baseModuleId: _moduleReferenceId(expression.target),
+        baseModuleId: _moduleExpressionId(expression.target),
       ).id;
     }
 
-    return _moduleReferenceId(expression);
+    return _moduleExpressionId(expression);
   }
 
   VariableDeclaration? _moduleDeclarationFor(AstNode node) {
@@ -643,14 +753,21 @@ final class _UnitCollector extends RecursiveAstVisitor<void> {
 
   void _collectModule(InstanceCreationExpression node) {
     final declaration = _moduleDeclarationFor(node);
-    final module = _moduleForDeclaration(declaration, node);
+    final constructorName = node.constructorName.name?.name;
+    final module = _moduleForDeclaration(
+      declaration,
+      node,
+      isComplete: constructorName == 'complete',
+    );
+    if (module.collected) return;
+    module.collected = true;
 
-    if (node.constructorName.name?.name == 'merge') {
+    if (constructorName == 'merge') {
       final first = _firstPositionalArgument(node.argumentList);
       if (first is ListLiteral) {
         for (final element in first.elements) {
           if (element is Expression) {
-            final id = _moduleReferenceId(element);
+            final id = _moduleExpressionId(element);
             if (id != null) module.includedModuleIds.add(id);
           }
         }
@@ -661,6 +778,9 @@ final class _UnitCollector extends RecursiveAstVisitor<void> {
     final first = _firstPositionalArgument(node.argumentList);
     if (first is ListLiteral) {
       _collectModuleElements(first, module);
+    } else if (first is Expression) {
+      final includedId = _moduleExpressionId(first);
+      if (includedId != null) module.includedModuleIds.add(includedId);
     }
   }
 
@@ -670,8 +790,10 @@ final class _UnitCollector extends RecursiveAstVisitor<void> {
       declaration,
       node,
       isOverride: true,
-      baseModuleId: _moduleReferenceId(node.target),
+      baseModuleId: _moduleExpressionId(node.target),
     );
+    if (module.collected) return;
+    module.collected = true;
 
     final first = _firstPositionalArgument(node.argumentList);
     if (first is ListLiteral) {
@@ -683,28 +805,32 @@ final class _UnitCollector extends RecursiveAstVisitor<void> {
     VariableDeclaration? declaration,
     AstNode node, {
     bool isOverride = false,
+    bool isComplete = false,
     String? baseModuleId,
   }) {
     final name = declaration?.name.lexeme ?? 'module@${node.offset}';
     final element = declaration?.declaredFragment?.element;
     final id = elementIdentity(element) ?? '${result.uri}#$name';
 
-    return index.modules.putIfAbsent(
+    final module = index.modules.putIfAbsent(
       id,
       () => _ModuleInfo(
         id: id,
         name: name,
         location: _location(node.offset, node.length),
         isOverride: isOverride,
+        isComplete: isComplete,
         baseModuleId: baseModuleId,
       ),
     );
+    if (isComplete) module.isComplete = true;
+    return module;
   }
 
   void _collectModuleElements(ListLiteral list, _ModuleInfo module) {
     for (final element in list.elements) {
       if (element is SpreadElement) {
-        final includedId = _moduleReferenceId(element.expression);
+        final includedId = _moduleExpressionId(element.expression);
         if (includedId != null) module.includedModuleIds.add(includedId);
         continue;
       }
@@ -776,8 +902,57 @@ final class _UnitCollector extends RecursiveAstVisitor<void> {
     );
   }
 
-  String? _moduleReferenceId(Expression? expression) {
-    return elementIdentity(referencedElement(expression));
+  String? _moduleExpressionId(Expression? expression) {
+    final value = expression?.unParenthesized;
+    if (value == null) return null;
+
+    final referenced = referencedElement(value);
+    final reference = elementIdentity(referenced);
+    if (reference != null) {
+      if (index.modules.containsKey(reference)) return reference;
+
+      final referenceName = switch (value) {
+        SimpleIdentifier(:final name) => name,
+        PrefixedIdentifier(:final identifier) => identifier.name,
+        PropertyAccess(:final propertyName) => propertyName.name,
+        _ => null,
+      };
+      final referenceLibrary = elementLibraryUri(referenced);
+      if (referenceName != null && referenceLibrary != null) {
+        final matches = index.modules.values
+            .where(
+              (module) =>
+                  module.name == referenceName &&
+                  module.id.startsWith('$referenceLibrary#'),
+            )
+            .toList();
+        if (matches.length == 1) return matches.single.id;
+      }
+
+      return reference;
+    }
+
+    if (value is InstanceCreationExpression && isModuleType(value.staticType)) {
+      final constructorName = value.constructorName.name?.name;
+      return _moduleForDeclaration(
+        _moduleDeclarationFor(value),
+        value,
+        isComplete: constructorName == 'complete',
+      ).id;
+    }
+
+    if (value is MethodInvocation &&
+        value.methodName.name == 'overrideWith' &&
+        isModuleType(value.staticType)) {
+      return _moduleForDeclaration(
+        _moduleDeclarationFor(value),
+        value,
+        isOverride: true,
+        baseModuleId: _moduleExpressionId(value.target),
+      ).id;
+    }
+
+    return null;
   }
 
   Expression? _firstPositionalArgument(ArgumentList list) {
@@ -841,6 +1016,7 @@ final class _ModuleInfo {
     required this.name,
     required this.location,
     required this.isOverride,
+    required this.isComplete,
     required this.baseModuleId,
   });
 
@@ -848,6 +1024,8 @@ final class _ModuleInfo {
   final String name;
   final _SourceLocation location;
   final bool isOverride;
+  bool isComplete;
+  bool collected = false;
   final String? baseModuleId;
   final List<_ProviderInfo> providers = <_ProviderInfo>[];
   final Set<String> includedModuleIds = <String>{};
