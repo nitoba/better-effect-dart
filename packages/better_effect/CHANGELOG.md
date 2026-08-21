@@ -1,5 +1,10 @@
 ## Unreleased
 
+- Added the repository-level normative semantic contract and an independent
+  cross-package conformance suite mapping stable lifecycle/outcome rules to
+  executable rule IDs.
+- Semantic compatibility changes now require the matching conformance scenario,
+  affected package changelog entries, and a semantic migration ledger entry.
 - Added `Runtime.fork` for feature-length child environments with local-first
   resolution and parent fallback.
 - Child Module resources survive multiple executions, close exactly once with

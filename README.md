@@ -1,8 +1,8 @@
 # better_effect monorepo
 
 This repository contains three independently versioned Dart and Flutter
-packages. Each package has its own `pubspec.yaml`, changelog, tests, and pub.dev
-release workflow.
+packages. Each published package has its own `pubspec.yaml`, changelog, tests,
+and pub.dev release workflow.
 
 ## Packages
 
@@ -17,6 +17,23 @@ The Flutter sample application lives at
 It stays beside the package so the published package can expose a runnable
 example without creating a separate release unit.
 
+## Normative semantics
+
+[`SEMANTICS.md`](SEMANTICS.md) is the versioned compatibility contract for the
+stable lifecycle and outcome behavior shared by `better_effect` and
+`better_effect_flutter`. It defines explicit MUST/MUST NOT rules for Effect and
+Exit, Scope/resource ownership, Runtime shutdown/environments, concurrency,
+retry, Commands, and Flutter Runtime ownership.
+
+The internal [`better_effect_conformance`](packages/better_effect_conformance)
+package executes those rules as an independent CI gate. Every stable rule has a
+rule ID and an executable scenario; the suite also verifies that the normative
+catalog and document stay synchronized.
+
+A compatibility-breaking semantic change must update the normative rule,
+conformance scenario, affected package changelog(s), and
+[`docs/semantic-migrations.md`](docs/semantic-migrations.md) in the same change.
+
 ## Repository layout
 
 ```text
@@ -25,17 +42,21 @@ packages/
   better_effect_flutter/
     example/
   better_effect_analyzer/
+  better_effect_conformance/ # Internal executable semantic contract
 skills/
-  better-effect/          # Official Agent Skill
+  better-effect/             # Official Agent Skill
 .github/
   workflows/
 apps/
-  docs/                   # Next.js + Fumadocs
+  docs/                      # Next.js + Fumadocs
+docs/
+  semantic-migrations.md
+SEMANTICS.md
 ```
 
 There is intentionally no root Dart package. Dependencies and lockfiles belong
-to the package or example that owns them, which keeps package publication and
-dependency resolution independent.
+to the package, example, or internal conformance unit that owns them, which
+keeps published package resolution independent.
 
 ## Documentation site
 
@@ -97,10 +118,20 @@ flutter analyze --fatal-infos
 flutter test
 ```
 
-For local monorepo work, the ignored `pubspec_overrides.yaml` files replace
-hosted package dependencies with sibling paths. They are not included in pub
-archives. The example's `pubspec.lock` is tracked because it belongs to the
-example application; publishable package lockfiles remain ignored.
+Run the semantic contract independently from ordinary unit tests:
+
+```bash
+cd packages/better_effect_conformance
+flutter pub get
+dart format --output=none --set-exit-if-changed .
+flutter analyze --fatal-infos
+flutter test
+```
+
+For local monorepo work, ignored `pubspec_overrides.yaml` files replace hosted
+package dependencies with sibling paths. They are not included in pub archives.
+The example's `pubspec.lock` is tracked because it belongs to the example
+application; publishable package lockfiles remain ignored.
 
 ## Independent releases
 

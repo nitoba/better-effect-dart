@@ -1,0 +1,44 @@
+---
+title: Contrato semântico normativo
+description: Regras de compatibilidade para lifecycle, outcomes, recursos, concorrência, Commands e ownership
+---
+
+O comportamento estável de `better_effect` e `better_effect_flutter` é definido
+por um contrato normativo versionado no repositório. Ele usa **MUST**, **MUST
+NOT**, **SHOULD** e **MAY** para separar requisitos de compatibilidade de detalhes
+de implementação.
+
+A fonte canônica é [`SEMANTICS.md`](https://github.com/nitoba/better-effect-dart/blob/main/SEMANTICS.md).
+Os guias deste site explicam como usar as APIs; quando houver dúvida sobre
+lifecycle, precedence de outcomes, cleanup, interruption ou ownership, o
+contrato normativo é a referência final.
+
+## Contrato executável
+
+Cada regra estável possui um ID, como `SCOPE-02`, `RUNTIME-05` ou `COMMAND-04`.
+O package interno `packages/better_effect_conformance` registra um cenário
+executável para cada ID e um meta-teste impede que uma regra exista somente na
+documentação ou somente nos testes.
+
+A suíte é executada por um workflow de CI separado dos unit tests normais. Os
+cenários sensíveis a concorrência usam gates, signals, `ManualEffectClock`,
+eventos do Runtime ou o fake clock do Flutter, sem sleeps dependentes da
+velocidade da máquina.
+
+## Mudanças semânticas
+
+Alterar uma regra `MUST`/`MUST NOT` é uma mudança de compatibilidade. O mesmo PR
+deve atualizar o cenário de conformance, os changelogs afetados e o
+[`semantic migration ledger`](https://github.com/nitoba/better-effect-dart/blob/main/docs/semantic-migrations.md).
+
+Isso permite que refactors internos continuem livres, mas impede que uma mudança
+de ownership ou precedence seja introduzida silenciosamente como se fosse apenas
+uma alteração de implementação.
+
+## Dart e TypeScript
+
+O contrato também mantém uma pequena tabela de alinhamento com o
+`better-effect` TypeScript. Não existe exigência de paridade de implementação ou
+de type system; o objetivo é evitar que nomes compartilhados como Runtime,
+Scope, interruption e `runWith` tenham significados contraditórios de ownership
+ou outcome entre as duas bibliotecas.
