@@ -30,9 +30,17 @@ jobs:
 
       - name: Verify milestone is ready
         run: |
+          gh api "repos/${GITHUB_REPOSITORY}/milestones/3" \
+            --jq '"Milestone: \(.title) | state=\(.state) | open=\(.open_issues) | closed=\(.closed_issues)"'
+
           open_issues="$(gh api "repos/${GITHUB_REPOSITORY}/milestones/3" --jq '.open_issues')"
           if [ "$open_issues" != "0" ]; then
-            echo "v0.4 milestone still has ${open_issues} open issue(s)."
+            echo "Open issues assigned to milestone #3:"
+            gh api --method GET "repos/${GITHUB_REPOSITORY}/issues" \
+              -f milestone=3 \
+              -f state=open \
+              -f per_page=100 \
+              --jq '.[] | "#\(.number) \(.title)"'
             exit 1
           fi
 
