@@ -31,11 +31,16 @@ jobs:
       - name: Verify milestone is ready
         run: |
           gh api "repos/${GITHUB_REPOSITORY}/milestones/3" \
-            --jq '"Milestone: \(.title) | state=\(.state) | open=\(.open_issues) | closed=\(.closed_issues)"'
+            --jq '"Milestone: \(.title) | state=\(.state) | aggregate-open=\(.open_issues) | closed=\(.closed_issues)"'
 
-          open_issues="$(gh api "repos/${GITHUB_REPOSITORY}/milestones/3" --jq '.open_issues')"
-          if [ "$open_issues" != "0" ]; then
-            echo "Open issues assigned to milestone #3:"
+          open_items="$(gh api --method GET "repos/${GITHUB_REPOSITORY}/issues" \
+            -f milestone=3 \
+            -f state=open \
+            -f per_page=100 \
+            --jq 'length')"
+
+          if [ "$open_items" != "0" ]; then
+            echo "Open items assigned to milestone #3:"
             gh api --method GET "repos/${GITHUB_REPOSITORY}/issues" \
               -f milestone=3 \
               -f state=open \
@@ -43,6 +48,8 @@ jobs:
               --jq '.[] | "#\(.number) \(.title)"'
             exit 1
           fi
+
+          echo "Canonical open-item query returned zero; milestone is ready to close."
 
       - name: Close v0.4 milestone
         run: |
@@ -52,6 +59,9 @@ jobs:
             -f state=closed \
             -f description='Implementation completed on August 21, 2026. Issues #20-#25 and epic #4 are closed. The original #21 standard-services proposal was deliberately narrowed to optional EffectClock/EffectRandom policy services; Logger/Config were not shipped as v0.4 contracts. Package versioning/publication is tracked separately from this implementation milestone.' \
             >/dev/null
+
+          gh api "repos/${GITHUB_REPOSITORY}/milestones/3" \
+            --jq '"Closed milestone: \(.title) | state=\(.state) | open=\(.open_issues) | closed=\(.closed_issues)"'
 
       - name: Remove one-shot finalizer
         run: |
