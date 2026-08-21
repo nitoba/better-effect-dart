@@ -6,6 +6,9 @@ on:
       - main
     paths:
       - .github/workflows/finalize-v0.4-milestone.yml
+  pull_request:
+    paths:
+      - .github/workflows/finalize-v0.4-milestone.yml
 
 permissions:
   contents: write
