@@ -33,12 +33,22 @@ npx skills use nitoba/better-effect-dart@better-effect
 - Flutter MVVM com `EffectViewModel` e `EffectCommand`;
 - Command state, policies, debounce/throttle/queue e selectors;
 - Runtime ownership e lifecycle na árvore Flutter;
-- implementação nova, debugging, code review e refatoração profunda.
+- implementação nova, debugging, code review e refatoração profunda;
+- consulta à documentação oficial publicada por meio de `llms.txt`, conteúdo Markdown por página e `llms-full.txt` como fallback.
 
 ## Fonte de verdade
 
-A skill usa a linha `0.3.x` como baseline, mas a versão efetivamente instalada no projeto sempre prevalece. Em caso de dúvida, consulte source, testes e documentação da mesma versão antes de propor uma API.
+A skill usa a linha `0.3.x` como baseline embutido, mas a versão efetivamente instalada no projeto sempre prevalece.
+
+Para documentação atual, a skill referencia:
+
+- <https://better-effect-dart.vercel.app/docs> — site oficial;
+- <https://better-effect-dart.vercel.app/llms.txt> — índice das páginas para agentes/LLMs;
+- `https://better-effect-dart.vercel.app/llms.mdx/docs/<caminho>/content.md` — conteúdo Markdown específico de cada página;
+- <https://better-effect-dart.vercel.app/llms-full.txt> — corpus completo usado apenas como fallback.
+
+Em caso de dúvida de compatibilidade, consulte source, testes e documentação da mesma versão antes de propor uma API.
 
 ## Arquivos
 
-`SKILL.md` contém o fluxo principal. `references/` aprofunda regras e transformações para core e Flutter. `scripts/verify.sh` executa format, analyzer e testes quando chamado a partir da raiz de um projeto Dart/Flutter.
+`SKILL.md` contém o fluxo principal. `references/` aprofunda regras e transformações para core e Flutter; `references/official-documentation.md` descreve como descobrir e consultar a documentação oficial publicada sem carregar o corpus inteiro desnecessariamente. `scripts/verify.sh` executa format, analyzer e testes quando chamado a partir da raiz de um projeto Dart/Flutter.
