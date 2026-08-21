@@ -43,6 +43,7 @@ final class EffectViewModelBuilder<T extends ChangeNotifier>
 final class _EffectViewModelBuilderState<T extends ChangeNotifier>
     extends State<EffectViewModelBuilder<T>> {
   T? _viewModel;
+  Runtime? _runtime;
   EffectCommands? _commands;
   bool _ownsCurrentViewModel = false;
 
@@ -66,12 +67,19 @@ final class _EffectViewModelBuilderState<T extends ChangeNotifier>
   void didChangeDependencies() {
     super.didChangeDependencies();
 
-    final commands = context.watchEffectCommands();
-    if (_viewModel != null && identical(commands, _commands)) {
+    final scope = BetterEffectScope.of(context);
+    final runtime = scope.runtime;
+    final commands = scope.commands;
+
+    if (_viewModel != null && identical(runtime, _runtime)) {
+      // Command observer configuration can replace the EffectCommands facade
+      // without changing the effective Runtime. Keep the existing ViewModel in
+      // that case, but remember the latest facade for an explicit recreateKey.
+      _commands = commands;
       return;
     }
 
-    _replaceViewModel(commands);
+    _replaceViewModel(runtime, commands);
   }
 
   @override
@@ -79,9 +87,10 @@ final class _EffectViewModelBuilderState<T extends ChangeNotifier>
     super.didUpdateWidget(oldWidget);
 
     if (oldWidget.recreateKey != widget.recreateKey) {
+      final runtime = _runtime;
       final commands = _commands;
-      if (commands != null) {
-        _replaceViewModel(commands);
+      if (runtime != null && commands != null) {
+        _replaceViewModel(runtime, commands);
       }
       return;
     }
@@ -99,12 +108,13 @@ final class _EffectViewModelBuilderState<T extends ChangeNotifier>
     super.dispose();
   }
 
-  void _replaceViewModel(EffectCommands commands) {
+  void _replaceViewModel(Runtime runtime, EffectCommands commands) {
     final previous = _viewModel;
     if (previous != null && _ownsCurrentViewModel) {
       previous.dispose();
     }
 
+    _runtime = runtime;
     _commands = commands;
     final viewModel = widget.create(context, commands);
     _viewModel = viewModel;

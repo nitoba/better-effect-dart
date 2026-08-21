@@ -1,5 +1,10 @@
 ## Unreleased
 
+- Added `BetterEffectFeatureScope` for feature-owned child Runtimes with
+  loading/error/retry startup, nested feature environments, and generation-safe
+  restart behavior.
+- ViewModels and Commands inside a feature automatically bind to the child
+  environment, while feature disposal never closes the parent Runtime.
 - Added `EffectCommandSelector` with strongly typed state and snapshot selection.
 - Added default `==` and custom equality strategies for selected values.
 - Added `EffectCommandBuilder.buildWhen` and matching Consumer support.

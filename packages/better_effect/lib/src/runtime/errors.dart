@@ -71,7 +71,7 @@ final class ResourceAcquisitionException implements Exception {
   }
 }
 
-/// Reported when a custom backend cannot create an execution-local overlay.
+/// Reported when a custom backend cannot create an isolated child overlay.
 final class ResolverBackendOverlayUnsupportedException implements Exception {
   const ResolverBackendOverlayUnsupportedException(this.backendType);
 
@@ -79,7 +79,7 @@ final class ResolverBackendOverlayUnsupportedException implements Exception {
 
   @override
   String toString() {
-    return '$backendType does not support execution-scoped Modules. '
+    return '$backendType does not support scoped child environments. '
         'Implement ResolverBackendOverlayFactory or use AutoInjectorBackend.';
   }
 }

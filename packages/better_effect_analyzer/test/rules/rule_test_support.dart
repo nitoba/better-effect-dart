@@ -128,6 +128,8 @@ final class Runtime {
   bool get isClosed => false;
   Object get state => Object();
 
+  Future<Runtime> fork(Module module, {String? label}) async => Runtime();
+
   EffectExecution<A, E> execute<A extends Object, E extends Object>(
     Effect<A, E> effect,
   ) => throw UnimplementedError();

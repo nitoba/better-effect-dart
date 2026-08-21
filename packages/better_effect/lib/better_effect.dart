@@ -25,6 +25,7 @@ part 'src/module/module.dart';
 part 'src/runtime/errors.dart';
 part 'src/runtime/exit.dart';
 part 'src/runtime/runtime.dart';
+part 'src/runtime/runtime_child.dart';
 part 'src/runtime/runtime_context.dart';
 part 'src/runtime/runtime_execution_module.dart';
 part 'src/runtime/runtime_observer.dart';

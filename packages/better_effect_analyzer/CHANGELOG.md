@@ -1,3 +1,14 @@
+## Unreleased
+
+- Child Runtime Modules discovered through `Runtime.fork` and statically visible
+  `BetterEffectFeatureScope` boundaries are modeled as scoped environments rather
+  than application roots.
+- Scoped feature Modules retain local duplicate, compatibility, cycle, and
+  resource-order validation while requirements supplied by a parent Runtime stay
+  external to the child graph.
+- Manual `Runtime.fork` values now participate in the existing
+  `runtime_started_without_close` ownership diagnostic.
+
 ## 0.3.0
 
 - The graph checker now recognizes Modules passed directly to

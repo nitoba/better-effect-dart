@@ -638,6 +638,17 @@ final class Runtime {
     }
 
     try {
+      await _closeRuntimeChildren(
+        this,
+        exit,
+        gracePeriod: gracePeriod,
+        interruptAfterGracePeriod: interruptAfterGracePeriod,
+      );
+    } catch (error, stackTrace) {
+      captureError(error, stackTrace);
+    }
+
+    try {
       await _awaitActiveExecutions(
         gracePeriod: gracePeriod,
         interruptAfterGracePeriod: interruptAfterGracePeriod,

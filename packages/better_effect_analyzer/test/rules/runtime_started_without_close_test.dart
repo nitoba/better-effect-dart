@@ -31,6 +31,22 @@ Future<void> run(Module module) async {
     await assertDiagnostics(source, [lint(offset, 'module.start()'.length)]);
   }
 
+  Future<void> test_reportsForkedRuntimeWithoutOwner() async {
+    const source = r'''
+import 'package:better_effect/better_effect.dart';
+
+Future<void> run(Runtime runtime, Module module) async {
+  final child = await runtime.fork(module);
+  child.hashCode;
+}
+''';
+
+    final offset = source.indexOf('runtime.fork(module)');
+    await assertDiagnostics(source, [
+      lint(offset, 'runtime.fork(module)'.length),
+    ]);
+  }
+
   Future<void> test_allowsTryFinallyOwnership() async {
     await assertNoDiagnostics(r'''
 import 'package:better_effect/better_effect.dart';
@@ -46,12 +62,37 @@ Future<void> run(Module module) async {
 ''');
   }
 
+  Future<void> test_allowsForkTryFinallyOwnership() async {
+    await assertNoDiagnostics(r'''
+import 'package:better_effect/better_effect.dart';
+
+Future<void> run(Runtime runtime, Module module) async {
+  final child = await runtime.fork(module);
+  try {
+    child.hashCode;
+  } finally {
+    await child.close();
+  }
+}
+''');
+  }
+
   Future<void> test_allowsReturnedRuntime() async {
     await assertNoDiagnostics(r'''
 import 'package:better_effect/better_effect.dart';
 
 Future<Runtime> build(Module module) async {
   return module.start();
+}
+''');
+  }
+
+  Future<void> test_allowsReturnedForkedRuntime() async {
+    await assertNoDiagnostics(r'''
+import 'package:better_effect/better_effect.dart';
+
+Future<Runtime> build(Runtime runtime, Module module) async {
+  return runtime.fork(module);
 }
 ''');
   }

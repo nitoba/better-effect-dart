@@ -90,24 +90,14 @@ final class BetterEffectGraphService {
     required this.keyName,
   });
 
-  /// Stable identity composed from the resolved type and key identity.
   final String id;
-
-  /// Human-readable Dart type.
   final String display;
-
-  /// Stable resolved type identity.
   final String typeId;
-
-  /// Stable key identity used to match providers and requests.
   final String keyId;
-
-  /// Human-oriented key name when it can be resolved statically.
   final String? keyName;
 
   bool get isKeyed => keyId != '<default>';
 
-  /// Selector accepted by `--why` when the display type is ambiguous.
   String get selector => keyName == null ? display : '$display[$keyName]';
 
   Map<String, Object?> toJson() => <String, Object?>{
@@ -135,10 +125,7 @@ final class BetterEffectGraphDependency {
   final String providerId;
   final String serviceId;
   final BetterEffectDependencyKind kind;
-
-  /// Whether the selected Module environment provides [serviceId].
   final bool isResolved;
-
   final BetterEffectGraphLocation? location;
 
   Map<String, Object?> toJson() => <String, Object?>{
@@ -152,10 +139,6 @@ final class BetterEffectGraphDependency {
 }
 
 /// One effective provider inside a Module environment.
-///
-/// Providers are projected per Module environment. A reusable provider included
-/// in two roots therefore has one effective provider per root, allowing
-/// overrides to be represented without losing source location.
 final class BetterEffectGraphProvider {
   BetterEffectGraphProvider({
     required this.id,
@@ -171,13 +154,8 @@ final class BetterEffectGraphProvider {
   }) : dependencyIds = List<String>.unmodifiable(dependencyIds);
 
   final String id;
-
-  /// Environment in which this provider is effective.
   final String moduleId;
-
-  /// Module declaration that originally contributed the binding.
   final String declaredModuleId;
-
   final String serviceId;
   final String serviceDisplay;
   final String? implementationDisplay;
@@ -200,7 +178,8 @@ final class BetterEffectGraphProvider {
   };
 }
 
-/// One reusable, complete, execution-scoped, or overridden Module projection.
+/// One reusable, complete, execution-scoped, child-Runtime, or overridden
+/// Module projection.
 final class BetterEffectGraphModule {
   BetterEffectGraphModule({
     required this.id,
@@ -208,6 +187,7 @@ final class BetterEffectGraphModule {
     required this.location,
     required this.isComplete,
     required this.isExecutionOverlay,
+    this.isChildRuntimeModule = false,
     required this.isOverride,
     required this.rootKind,
     required this.baseModuleId,
@@ -223,15 +203,16 @@ final class BetterEffectGraphModule {
   final BetterEffectGraphLocation location;
   final bool isComplete;
   final bool isExecutionOverlay;
+
+  /// Whether this Module is installed into a child Runtime via `fork` or a
+  /// statically visible `BetterEffectFeatureScope` boundary.
+  final bool isChildRuntimeModule;
+
   final bool isOverride;
   final BetterEffectGraphRootKind? rootKind;
   final String? baseModuleId;
   final List<String> includedModuleIds;
-
-  /// Providers declared directly in this Module.
   final List<String> declaredProviderIds;
-
-  /// Providers effective after merge and override expansion.
   final List<String> providerIds;
 
   bool get isRoot => rootKind != null;
@@ -242,6 +223,7 @@ final class BetterEffectGraphModule {
     'location': location.toJson(),
     'isComplete': isComplete,
     'isExecutionOverlay': isExecutionOverlay,
+    'isChildRuntimeModule': isChildRuntimeModule,
     'isOverride': isOverride,
     'rootKind': rootKind?.name,
     'baseModuleId': baseModuleId,
@@ -301,21 +283,15 @@ final class BetterEffectGraph {
            );
 
   final String projectName;
-
-  /// Absolute path in the embedded API. Serialized locations remain relative.
   final String rootPath;
-
   final List<String> rootModuleIds;
   final List<BetterEffectGraphModule> modules;
   final List<BetterEffectGraphService> services;
   final List<BetterEffectGraphProvider> providers;
   final List<BetterEffectGraphDependency> dependencies;
   final List<BetterEffectGraphDiagnostic> diagnostics;
-
-  /// Declarations proven unreachable from explicit complete roots.
   final List<String> unreachableModuleIds;
   final List<String> unreachableProviderIds;
-
   final Map<String, BetterEffectGraphModule> modulesById;
   final Map<String, BetterEffectGraphService> servicesById;
   final Map<String, BetterEffectGraphProvider> providersById;

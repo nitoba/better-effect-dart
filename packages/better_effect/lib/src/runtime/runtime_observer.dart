@@ -52,6 +52,9 @@ final class RuntimeEventContext {
     required this.parentExecutionId,
     required this.scopeId,
     required Map<String, Object> localMetadata,
+    this.runtimeId = 0,
+    this.parentRuntimeId,
+    this.runtimeLabel,
   }) : localMetadata = Map<String, Object>.unmodifiable(localMetadata);
 
   /// Zero identifies work owned by the root Runtime rather than one Effect.
@@ -63,6 +66,15 @@ final class RuntimeEventContext {
   /// Reserved for structured child executions. It is null for current
   /// root-owned managed executions.
   final int? parentExecutionId;
+
+  /// Stable identity of the Runtime that owns this event.
+  final int runtimeId;
+
+  /// Parent Runtime identity for a forked feature environment.
+  final int? parentRuntimeId;
+
+  /// Optional diagnostic label supplied when the child Runtime was forked.
+  final String? runtimeLabel;
 
   /// Stable opaque identity for the owning Scope. The mutable Scope itself is
   /// never exposed to observers.
@@ -423,6 +435,9 @@ final class _ExecutionObservation {
     required this.executionId,
     required this.executionLabel,
     required this.parentExecutionId,
+    this.runtimeId,
+    this.parentRuntimeId,
+    this.runtimeLabel,
     required this.startedAt,
     required Map<String, Object> initialMetadata,
   }) : initialMetadata = Map<String, Object>.unmodifiable(initialMetadata);
@@ -431,14 +446,21 @@ final class _ExecutionObservation {
   final int executionId;
   final String? executionLabel;
   final int? parentExecutionId;
+  final int? runtimeId;
+  final int? parentRuntimeId;
+  final String? runtimeLabel;
   final DateTime startedAt;
   final Map<String, Object> initialMetadata;
 
   RuntimeEventContext context(Scope scope, Map<Object, Object> locals) {
+    final hierarchy = _runtimeMetadataForScope(scope);
     return RuntimeEventContext(
       executionId: executionId,
       executionLabel: executionLabel,
       parentExecutionId: parentExecutionId,
+      runtimeId: runtimeId ?? hierarchy.runtimeId,
+      parentRuntimeId: parentRuntimeId ?? hierarchy.parentRuntimeId,
+      runtimeLabel: runtimeLabel ?? hierarchy.runtimeLabel,
       scopeId: identityHashCode(scope),
       localMetadata: <String, Object>{
         ...initialMetadata,
