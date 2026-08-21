@@ -1,0 +1,298 @@
+name: Release v0.4.0
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/release-v0.4.0.yml'
+
+permissions:
+  contents: write
+  actions: write
+  pull-requests: write
+
+jobs:
+  prepare:
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.prepare.outputs.changed }}
+    steps:
+      - name: Checkout release branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Prepare coordinated 0.4.0 versions
+        id: prepare
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if grep -q '^version: 0.4.0$' packages/better_effect/pubspec.yaml \
+            && grep -q '^version: 0.4.0$' packages/better_effect_flutter/pubspec.yaml \
+            && grep -q '^version: 0.4.0$' packages/better_effect_analyzer/pubspec.yaml; then
+            echo 'changed=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo 'Release files must already be prepared before the final gate.'
+          exit 1
+
+  validate:
+    if: github.event_name == 'pull_request' && needs.prepare.outputs.changed != 'true'
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout release branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Validate release versions
+        run: |
+          set -euo pipefail
+          grep -q '^version: 0.4.0$' packages/better_effect/pubspec.yaml
+          grep -q '^version: 0.4.0$' packages/better_effect_flutter/pubspec.yaml
+          grep -q '^version: 0.4.0$' packages/better_effect_analyzer/pubspec.yaml
+          grep -q '^  better_effect: \^0.4.0$' packages/better_effect_flutter/pubspec.yaml
+          grep -q '^## 0.4.0$' packages/better_effect/CHANGELOG.md
+          grep -q '^## 0.4.0$' packages/better_effect_flutter/CHANGELOG.md
+          grep -q '^## 0.4.0$' packages/better_effect_analyzer/CHANGELOG.md
+
+      - name: Validate better_effect publication
+        run: |
+          set -euo pipefail
+          cd packages/better_effect
+          dart pub get
+          dart format --output=none --set-exit-if-changed .
+          dart analyze --fatal-infos
+          dart test
+          dart pub publish --dry-run
+
+      - name: Validate better_effect_analyzer publication
+        run: |
+          set -euo pipefail
+          cd packages/better_effect_analyzer
+          dart pub get
+          dart format --output=none --set-exit-if-changed .
+          dart analyze --fatal-infos
+          dart test
+          dart pub publish --dry-run
+
+      - name: Validate better_effect_flutter publication
+        run: |
+          set -euo pipefail
+          cat > packages/better_effect_flutter/pubspec_overrides.yaml <<'YAML'
+          dependency_overrides:
+            better_effect:
+              path: ../better_effect
+          YAML
+          cd packages/better_effect_flutter
+          flutter pub get
+          dart format --output=none --set-exit-if-changed .
+          flutter analyze --fatal-infos
+          flutter test
+          flutter pub publish --dry-run --ignore-warnings
+          rm pubspec_overrides.yaml
+
+      - name: Validate Flutter example
+        run: |
+          set -euo pipefail
+          cat > packages/better_effect_flutter/example/pubspec_overrides.yaml <<'YAML'
+          dependency_overrides:
+            better_effect:
+              path: ../../better_effect
+            better_effect_flutter:
+              path: ..
+            better_effect_analyzer:
+              path: ../../better_effect_analyzer
+          YAML
+          cd packages/better_effect_flutter/example
+          flutter pub get
+          dart format --output=none --set-exit-if-changed lib test
+          flutter analyze --fatal-infos
+          flutter test
+          rm pubspec_overrides.yaml
+
+      - name: Validate semantic conformance
+        run: |
+          set -euo pipefail
+          cd packages/better_effect_conformance
+          flutter pub get
+          dart format --output=none --set-exit-if-changed .
+          flutter analyze --fatal-infos
+          flutter test
+
+  release:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Verify release commit
+        run: |
+          set -euo pipefail
+          grep -q '^version: 0.4.0$' packages/better_effect/pubspec.yaml
+          grep -q '^version: 0.4.0$' packages/better_effect_flutter/pubspec.yaml
+          grep -q '^version: 0.4.0$' packages/better_effect_analyzer/pubspec.yaml
+          grep -q '^  better_effect: \^0.4.0$' packages/better_effect_flutter/pubspec.yaml
+
+          for tag in \
+            better_effect-v0.4.0 \
+            better_effect_analyzer-v0.4.0 \
+            better_effect_flutter-v0.4.0; do
+            if git rev-parse "refs/tags/${tag}" >/dev/null 2>&1; then
+              echo "Release tag ${tag} already exists. Refusing to move or reuse it."
+              exit 1
+            fi
+            if gh release view "$tag" >/dev/null 2>&1; then
+              echo "GitHub release ${tag} already exists."
+              exit 1
+            fi
+          done
+
+      - name: Create immutable release tags
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git tag -a better_effect-v0.4.0 -m 'Release better_effect 0.4.0'
+          git tag -a better_effect_analyzer-v0.4.0 -m 'Release better_effect_analyzer 0.4.0'
+          git tag -a better_effect_flutter-v0.4.0 -m 'Release better_effect_flutter 0.4.0'
+          git push origin \
+            better_effect-v0.4.0 \
+            better_effect_analyzer-v0.4.0 \
+            better_effect_flutter-v0.4.0
+
+      - name: Publish packages in dependency order
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          dispatch_and_wait() {
+            local workflow="$1"
+            local ref="$2"
+            echo "Dispatching ${workflow} at ${ref}"
+            gh workflow run "$workflow" --ref "$ref"
+
+            local run_id=''
+            for _ in $(seq 1 90); do
+              run_id="$(gh run list \
+                --workflow "$workflow" \
+                --event workflow_dispatch \
+                --branch "$ref" \
+                --limit 1 \
+                --json databaseId \
+                --jq '.[0].databaseId // empty')"
+              if [ -n "$run_id" ]; then
+                break
+              fi
+              sleep 2
+            done
+
+            if [ -z "$run_id" ]; then
+              echo "Could not resolve workflow run for ${workflow} at ${ref}."
+              exit 1
+            fi
+
+            gh run watch "$run_id" --exit-status
+          }
+
+          wait_for_pub() {
+            local package="$1"
+            local version="$2"
+            echo "Waiting for ${package} ${version} on pub.dev"
+            for _ in $(seq 1 90); do
+              current="$(curl -fsSL "https://pub.dev/api/packages/${package}" \
+                | python3 -c 'import json,sys; print(json.load(sys.stdin)["latest"]["version"])' \
+                || true)"
+              if [ "$current" = "$version" ]; then
+                echo "${package} ${version} is available on pub.dev"
+                return 0
+              fi
+              sleep 5
+            done
+            echo "Timed out waiting for ${package} ${version} on pub.dev"
+            exit 1
+          }
+
+          dispatch_and_wait publish-better-effect.yml better_effect-v0.4.0
+          wait_for_pub better_effect 0.4.0
+
+          dispatch_and_wait publish-better-effect-analyzer.yml better_effect_analyzer-v0.4.0
+          wait_for_pub better_effect_analyzer 0.4.0
+
+          dispatch_and_wait publish-better-effect-flutter.yml better_effect_flutter-v0.4.0
+          wait_for_pub better_effect_flutter 0.4.0
+
+      - name: Create GitHub releases from package changelogs
+        run: |
+          set -euo pipefail
+
+          release_notes() {
+            local package="$1"
+            local changelog="$2"
+            local output="$3"
+            printf 'Published on pub.dev: https://pub.dev/packages/%s/versions/0.4.0\n\n' "$package" > "$output"
+            awk '
+              /^## 0\.4\.0$/ { in_release = 1; next }
+              in_release && /^## / { exit }
+              in_release { print }
+            ' "$changelog" >> "$output"
+          }
+
+          release_notes better_effect packages/better_effect/CHANGELOG.md /tmp/better_effect.md
+          release_notes better_effect_analyzer packages/better_effect_analyzer/CHANGELOG.md /tmp/better_effect_analyzer.md
+          release_notes better_effect_flutter packages/better_effect_flutter/CHANGELOG.md /tmp/better_effect_flutter.md
+
+          gh release create better_effect-v0.4.0 \
+            --verify-tag \
+            --title 'better_effect 0.4.0' \
+            --notes-file /tmp/better_effect.md
+
+          gh release create better_effect_analyzer-v0.4.0 \
+            --verify-tag \
+            --title 'better_effect_analyzer 0.4.0' \
+            --notes-file /tmp/better_effect_analyzer.md
+
+          gh release create better_effect_flutter-v0.4.0 \
+            --verify-tag \
+            --title 'better_effect_flutter 0.4.0' \
+            --notes-file /tmp/better_effect_flutter.md
+
+      - name: Remove one-shot release workflow
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git rm .github/workflows/release-v0.4.0.yml
+          git commit -m 'chore(release): remove v0.4.0 finalizer'
+          git push origin HEAD:main

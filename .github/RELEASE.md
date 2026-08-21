@@ -1,7 +1,9 @@
 # Releases
 
-Each package is released independently. A package's tag starts its workflow;
-there is no dependency between the three publish jobs.
+Each package is versioned and published independently. A package's tag starts its workflow.
+For a coordinated family release, publish `better_effect` before
+`better_effect_flutter` because the Flutter package depends on the matching hosted
+core release line. The analyzer remains independent.
 
 The repository uses a package-oriented layout: publishable libraries live under
 `packages/`. The Flutter example and package-specific examples remain inside
@@ -13,9 +15,9 @@ not move or reuse a release tag after pushing it.
 
 | Package | `pubspec.yaml` version | Tag | pub.dev tag pattern |
 | --- | --- | --- | --- |
-| `better_effect` | `0.3.0` | `better_effect-v0.3.0` | `better_effect-v{{version}}` |
-| `better_effect_flutter` | `0.3.0` | `better_effect_flutter-v0.3.0` | `better_effect_flutter-v{{version}}` |
-| `better_effect_analyzer` | `0.3.0` | `better_effect_analyzer-v0.3.0` | `better_effect_analyzer-v{{version}}` |
+| `better_effect` | `0.4.0` | `better_effect-v0.4.0` | `better_effect-v{{version}}` |
+| `better_effect_flutter` | `0.4.0` | `better_effect_flutter-v0.4.0` | `better_effect_flutter-v{{version}}` |
+| `better_effect_analyzer` | `0.4.0` | `better_effect_analyzer-v0.4.0` | `better_effect_analyzer-v{{version}}` |
 
 ## One-time pub.dev setup
 
@@ -42,8 +44,8 @@ pushing a release tag, and add any approval rules you want.
 For example:
 
 ```bash
-git tag better_effect-v0.3.0
-git push origin better_effect-v0.3.0
+git tag better_effect-v0.4.0
+git push origin better_effect-v0.4.0
 ```
 
 The other two workflows do not run. A failed or delayed release of one package

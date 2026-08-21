@@ -1,4 +1,4 @@
-## Unreleased
+## 0.4.0
 
 - Added the repository-level normative semantic contract and an independent
   cross-package conformance suite for Command authority, one-shot delivery, and

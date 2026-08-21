@@ -1,4 +1,4 @@
-## Unreleased
+## 0.4.0
 
 - Child Runtime Modules discovered through `Runtime.fork` and statically visible
   `BetterEffectFeatureScope` boundaries are modeled as scoped environments rather

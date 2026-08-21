@@ -84,7 +84,7 @@ Or add it manually:
 
 ```yaml
 dependencies:
-  better_effect: ^0.3.0
+  better_effect: ^0.4.0
 ```
 
 During local monorepo development, a path dependency can be used instead:
