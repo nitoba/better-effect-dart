@@ -1,16 +1,12 @@
 import { ImageResponse } from 'next/og';
-import { readFile } from 'node:fs/promises';
-import { join } from 'node:path';
 import { appDescription, appName } from '@/lib/shared';
+import { brandLogoDataUri } from '@/lib/brand/logo';
 
 export const alt = `${appName} — arquitetura tipada para Dart e Flutter`;
 export const size = { width: 1200, height: 630 };
 export const contentType = 'image/png';
 
-export default async function OpenGraphImage() {
-  const logo = await readFile(join(process.cwd(), 'public', 'logo.png'));
-  const logoData = `data:image/png;base64,${logo.toString('base64')}`;
-
+export default function OpenGraphImage() {
   return new ImageResponse(
     <div
       style={{
@@ -31,7 +27,7 @@ export default async function OpenGraphImage() {
           style={{
             width: 112,
             height: 112,
-            backgroundImage: `url(${logoData})`,
+            backgroundImage: `url(${brandLogoDataUri})`,
             backgroundPosition: 'center',
             backgroundRepeat: 'no-repeat',
             backgroundSize: 'contain',

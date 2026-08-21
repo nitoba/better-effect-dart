@@ -1,9 +1,8 @@
 import { getPageImageUrl, source } from '@/lib/source';
 import { notFound } from 'next/navigation';
 import { ImageResponse } from 'next/og';
-import { readFile } from 'node:fs/promises';
-import { join } from 'node:path';
 import { appName } from '@/lib/shared';
+import { brandLogoDataUri } from '@/lib/brand/logo';
 
 export const revalidate = false;
 
@@ -11,9 +10,6 @@ export async function GET(_req: Request, { params }: RouteContext<'/og/docs/[...
   const { slug } = await params;
   const page = source.getPage(slug.slice(0, -1));
   if (!page) notFound();
-
-  const logo = await readFile(join(process.cwd(), 'public', 'logo.png'));
-  const logoData = `data:image/png;base64,${logo.toString('base64')}`;
 
   return new ImageResponse(
     <div
@@ -35,7 +31,7 @@ export async function GET(_req: Request, { params }: RouteContext<'/og/docs/[...
           style={{
             width: 76,
             height: 76,
-            backgroundImage: `url(${logoData})`,
+            backgroundImage: `url(${brandLogoDataUri})`,
             backgroundPosition: 'center',
             backgroundRepeat: 'no-repeat',
             backgroundSize: 'contain',
