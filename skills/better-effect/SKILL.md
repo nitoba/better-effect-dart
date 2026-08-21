@@ -39,6 +39,8 @@ Leia em refatorações não triviais:
 - `references/transformation-patterns.md`
 - `references/upstream-reference.md`
 
+Leia também `references/official-documentation.md` quando a tarefa depender da API ou da semântica atual de `better_effect`, quando a skill local não detalhar uma feature ou quando houver dúvida sobre uma assinatura/comportamento.
+
 ### Flutter
 
 Use quando o projeto contém Flutter e usa `better_effect_flutter`, ou quando precisa integrar Effects existentes à camada Flutter.
@@ -52,6 +54,8 @@ Leia obrigatoriamente:
 
 Leia também `references/transformation-patterns.md` quando houver refatoração relevante no domínio/data/application.
 
+Leia `references/official-documentation.md` para confirmar APIs, lifecycle e comportamento atual de bootstrap/provider, `EffectCommand`, policies, selectors, feature scopes, testing e outras features que possam ter evoluído além do baseline embutido nesta skill.
+
 ## Fonte de verdade e compatibilidade
 
 Antes de editar:
@@ -64,6 +68,31 @@ Antes de editar:
 
 A referência que originou esta skill foi o monorepo `nitoba/better-effect-dart` na linha `0.3.x`, onde `better_effect_flutter` reexporta `better_effect`. Trate isso como baseline de conhecimento, não como licença para ignorar a versão instalada.
 
+### Documentação oficial publicada
+
+A documentação atual também é uma referência explícita desta skill:
+
+- site oficial: <https://better-effect-dart.vercel.app/docs>;
+- índice de todas as páginas para LLMs: <https://better-effect-dart.vercel.app/llms.txt>;
+- conteúdo Markdown por página: `https://better-effect-dart.vercel.app/llms.mdx/docs/<caminho>/content.md`;
+- corpus completo de fallback: <https://better-effect-dart.vercel.app/llms-full.txt>.
+
+Quando houver acesso à web e a tarefa depender do comportamento ou da API da biblioteca:
+
+1. consulte `llms.txt` para descobrir a página relevante;
+2. prefira uma ou poucas páginas Markdown específicas em `llms.mdx`;
+3. siga links adicionais apenas quando forem necessários para completar a implementação;
+4. use `llms-full.txt` somente se o índice/página específica falhar ou se a tarefa realmente exigir uma visão transversal da documentação inteira.
+
+Exemplos do padrão:
+
+- `/docs/guides/flutter-mvvm` → <https://better-effect-dart.vercel.app/llms.mdx/docs/guides/flutter-mvvm/content.md>;
+- `/docs/guides` → <https://better-effect-dart.vercel.app/llms.mdx/docs/guides/content.md>.
+
+Consulte `references/official-documentation.md` para o protocolo completo, rotas comuns e regras de precedência.
+
+A documentação publicada acompanha a linha atual e pode estar à frente da versão instalada no projeto. Para decidir se uma API pode ser usada, prevalecem `pubspec`/lockfile e o source/testes da versão efetivamente instalada. Use a documentação oficial para descoberta, semântica e exemplos; se ela mostrar uma API mais nova, adapte à versão real ou proponha explicitamente o upgrade.
+
 ## Tipos de tarefa
 
 Adapte a profundidade sem perder as semânticas da biblioteca:
@@ -71,7 +100,7 @@ Adapte a profundidade sem perder as semânticas da biblioteca:
 - **Implementação nova:** modele primeiro failures, Effects, services, Module/Runtime e ownership; em Flutter, defina ViewModel/Command/policy antes de ligar a UI.
 - **Refatoração:** faça inventário das ocorrências relevantes e corrija o padrão por completo, não apenas um exemplo.
 - **Debugging:** siga o fluxo `Effect -> Runtime -> Exit` e, em Flutter, `Command -> state/listener`; diferencie failure, defect e interruption antes de corrigir.
-- **Code review:** compare a mudança com a versão instalada, os testes e a documentação do repositório; aponte gaps confirmados separadamente de riscos que ainda dependem de validação.
+- **Code review:** compare a mudança com a versão instalada, os testes e a documentação oficial/repositório; aponte gaps confirmados separadamente de riscos que ainda dependem de validação.
 - **Arquitetura/DX:** prefira simplificações que expressem ownership e intenção; não introduza camadas vazias nem abstrações só para demonstrar features da biblioteca.
 
 ## Fluxo obrigatório
