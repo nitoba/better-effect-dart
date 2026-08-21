@@ -25,10 +25,12 @@ packages/
   better_effect_flutter/
     example/
   better_effect_analyzer/
+skills/
+  better-effect/          # Official Agent Skill
 .github/
   workflows/
 apps/
-  docs/                 # Next.js + Fumadocs
+  docs/                   # Next.js + Fumadocs
 ```
 
 There is intentionally no root Dart package. Dependencies and lockfiles belong
@@ -48,6 +50,23 @@ npm run dev
 ```
 
 Use `npm run build` to validate the production build.
+
+## Official Agent Skill
+
+This repository publishes the official `better-effect` Agent Skill for coding
+agents that support the open Agent Skills format. Install it directly from this
+repository with the Vercel Labs `skills` CLI:
+
+```bash
+npx skills add nitoba/better-effect-dart --skill better-effect
+```
+
+The skill covers implementation, review, debugging, and refactoring for
+`better_effect`, `better_effect_flutter`, `result_dart`, and the analyzer/tooling
+surface. Its source lives in [`skills/better-effect`](skills/better-effect).
+
+See the [AI documentation](apps/docs/content/docs/ai) for installation variants,
+usage guidance, and ready-to-use prompts.
 
 ## Local development
 
