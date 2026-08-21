@@ -1,0 +1,86 @@
+---
+title: Feature scopes
+description: Child Runtimes para recursos compartilhados por uma feature Flutter
+---
+
+`BetterEffectFeatureScope` ocupa o espaço entre o Runtime da aplicação e um Module de uma única execução. Ele é indicado para checkout, área autenticada, editor, wizard ou qualquer subtree que compartilhe recursos entre vários ViewModels e Commands.
+
+```dart
+BetterEffectFeatureScope(
+  module: checkoutModule,
+  label: 'checkout',
+  loadingBuilder: (_) => const CheckoutSplash(),
+  errorBuilder: (context, error, stackTrace, retry) {
+    return StartupError(onRetry: retry);
+  },
+  builder: (_) => const CheckoutFlow(),
+)
+```
+
+## Hierarquia de resolução
+
+```text
+Module da execução
+      ↓
+Runtime da feature
+      ↓
+Runtime da aplicação
+```
+
+Bindings da feature têm precedência. Serviços ausentes usam o Runtime pai como fallback, então providers e resources da feature podem depender de serviços da aplicação sem registrá-los novamente.
+
+O Runtime pai não resolve serviços exclusivos do filho.
+
+## Lifetime de resources
+
+Resources declarados no Module da feature sobrevivem a várias execuções e ViewModels daquele subtree. Eles são liberados quando o child Runtime fecha, não quando um Command individual termina.
+
+Isso torna o child Runtime apropriado para conexões, sessões, caches ou adapters que pertencem a uma feature inteira, mas não à aplicação inteira.
+
+## Ownership
+
+O widget nunca fecha o Runtime pai. No dispose ou restart, fecha somente o filho.
+
+Se o Runtime raiz fechar primeiro, ele coordena os filhos antes de liberar seus próprios resources. `gracePeriod` e `interruptExecutionsBeforeClose` reutilizam a mesma semântica cooperativa de `Runtime.close`.
+
+## Startup, erro e retry
+
+A criação do child Runtime é assíncrona. Enquanto ela acontece, o scope pode renderizar `loadingBuilder`. Se o startup falhar, `errorBuilder` recebe o erro, stack trace e uma função de retry.
+
+O startup é generation-safe: uma criação antiga que termina depois de um restart é fechada em vez de substituir o Runtime mais novo.
+
+## Restart da feature
+
+Trocar `module`, `label`, o Runtime pai ou `restartKey` cria um novo ambiente:
+
+```dart
+BetterEffectFeatureScope(
+  module: editorModule,
+  restartKey: documentId,
+  builder: (_) => const EditorScreen(),
+)
+```
+
+O child Runtime anterior é fechado e deixa de ser o boundary efetivo da feature.
+
+## ViewModels e Commands
+
+`EffectViewModelBuilder` lê o `EffectCommands` mais próximo. Como a feature publica um Commands boundary ligado ao child Runtime, ViewModels dentro do subtree executam Effects contra o ambiente da feature.
+
+Quando o child Runtime muda, o Commands boundary muda junto e ViewModels owned são recriados automaticamente. Não é necessário adicionar outro framework de DI ou state management.
+
+## Feature scopes aninhados
+
+Scopes podem ser aninhados. O scope interno usa o Runtime da feature externa como pai e herda transitivamente os serviços da aplicação.
+
+## Observabilidade
+
+`RuntimeEventContext` expõe `runtimeId`, `parentRuntimeId` e `runtimeLabel`. Assim, uma execução pode ser correlacionada à feature que a possui sem transformar IDs de execução em identificadores globais.
+
+## Analyzer
+
+Modules usados por `Runtime.fork` e por `BetterEffectFeatureScope` estaticamente visível são classificados como child Runtime Modules. Eles não viram composition roots falsos, mas continuam recebendo validações locais de duplicidade, ciclos, compatibilidade e ordem de resources.
+
+Requisitos que podem vir do Runtime pai permanecem externos quando essa composição não pode ser provada estaticamente. Ambientes parentais escolhidos dinamicamente continuam sendo uma limitação deliberada da análise estática.
+
+Criações manuais com `Runtime.fork` também participam da regra de ownership: retenha o child Runtime em um owner reconhecido ou feche-o em `try/finally`.

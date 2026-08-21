@@ -120,6 +120,7 @@ void main() {
         contains('ReportResource -> Repository -> Database'),
       );
     });
+
     test(
       'allows root requirements in a statically visible runWith Module',
       () async {
@@ -144,6 +145,59 @@ void main() {
 
       expect(diagnostic.message, contains("Resource 'RequestResource'"));
       expect(diagnostic.message, contains("requires 'LocalDatabase'"));
+    });
+
+    test(
+      'uses a statically known parent Runtime to satisfy child requirements',
+      () async {
+        _writeChildRuntimeSource(app, parentProvidesDatabase: true);
+
+        final result = await BetterEffectGraphChecker(app.path).check();
+
+        expect(
+          result.diagnostics.map((diagnostic) => diagnostic.code),
+          isNot(contains('missing_service')),
+        );
+      },
+    );
+
+    test(
+      'reports child requirements missing from a statically known parent',
+      () async {
+        _writeChildRuntimeSource(app, parentProvidesDatabase: false);
+
+        final result = await BetterEffectGraphChecker(app.path).check();
+        final diagnostic = result.diagnostics.singleWhere(
+          (item) => item.code == 'missing_service',
+        );
+
+        expect(diagnostic.message, contains("child Module 'featureModule'"));
+        expect(diagnostic.message, contains("requires 'Database'"));
+        expect(diagnostic.message, contains("'rootModule'"));
+      },
+    );
+
+    test('follows a statically known nested Runtime parent chain', () async {
+      _writeChildRuntimeSource(app, parentProvidesDatabase: true, nested: true);
+
+      final result = await BetterEffectGraphChecker(app.path).check();
+
+      expect(
+        result.diagnostics.map((diagnostic) => diagnostic.code),
+        isNot(contains('missing_service')),
+      );
+    });
+
+    test('keeps a Module as a root when it is also used as a child', () async {
+      _writeReusedChildRootSource(app);
+
+      final graph = await BetterEffectGraphChecker(app.path).graph();
+      final shared = graph.modules.singleWhere(
+        (module) => module.name == 'sharedModule',
+      );
+
+      expect(shared.isChildRuntimeModule, isTrue);
+      expect(shared.rootKind, BetterEffectGraphRootKind.complete);
     });
 
     test('validates a marked incomplete root at its declaration', () async {
@@ -318,8 +372,14 @@ final class Module {
   Module(Iterable<Binding> bindings);
   factory Module.complete(Iterable<Binding> bindings) => Module(bindings);
   Module overrideWith(Iterable<Binding> overrides) => this;
+  Future<Runtime> start() async => Runtime();
 }
+
 final class Runtime {
+  Future<Runtime> fork(Module module) async => Runtime();
+
+  Future<void> close() async {}
+
   Future<Object> runWith(Module module, Object effect) async => Object();
 
   Future<Object> runExitWith(Module module, Object effect) async => Object();
@@ -485,6 +545,95 @@ Future<void> handle(Runtime runtime) async {
     requestModule,
     Effect<int, AppFailure>.result((use) async => 1),
   );
+}
+''');
+}
+
+void _writeChildRuntimeSource(
+  Directory app, {
+  required bool parentProvidesDatabase,
+  bool nested = false,
+}) {
+  final source = File(p.join(app.path, 'lib', 'child_runtime.dart'))
+    ..parent.createSync(recursive: true);
+  final rootBinding = parentProvidesDatabase
+      ? '.provide<Database>(DatabaseLive.new),'
+      : '';
+  final setup = nested
+      ? '''
+  final middle = await root.fork(middleModule);
+  final feature = await middle.fork(featureModule);
+  try {
+    feature.hashCode;
+  } finally {
+    await feature.close();
+    await middle.close();
+    await root.close();
+  }
+'''
+      : '''
+  final feature = await root.fork(featureModule);
+  try {
+    feature.hashCode;
+  } finally {
+    await feature.close();
+    await root.close();
+  }
+''';
+
+  source.writeAsStringSync('''
+import 'package:better_effect/better_effect.dart';
+
+abstract interface class Database {}
+final class DatabaseLive implements Database {}
+
+final class FeatureRepository {
+  FeatureRepository(this.database);
+  final Database database;
+}
+
+final rootModule = Module([
+  $rootBinding
+]);
+
+final middleModule = Module(const <Binding>[]);
+
+final featureModule = Module([
+  .provide<FeatureRepository>(FeatureRepository.new),
+]);
+
+Future<void> buildFeature() async {
+  final root = await rootModule.start();
+$setup
+}
+''');
+}
+
+void _writeReusedChildRootSource(Directory app) {
+  final source = File(p.join(app.path, 'lib', 'reused_child.dart'))
+    ..parent.createSync(recursive: true);
+
+  source.writeAsStringSync('''
+import 'package:better_effect/better_effect.dart';
+
+final class SharedService {}
+
+final rootModule = Module.complete(const <Binding>[]);
+final sharedModule = Module.complete([
+  .instance<SharedService>(SharedService()),
+]);
+
+Future<void> build() async {
+  final root = await rootModule.start();
+  final sharedRoot = await sharedModule.start();
+  final child = await root.fork(sharedModule);
+  try {
+    child.hashCode;
+  } finally {
+    await child.close();
+    await sharedRoot.close();
+    await root.close();
+  }
 }
 ''');
 }

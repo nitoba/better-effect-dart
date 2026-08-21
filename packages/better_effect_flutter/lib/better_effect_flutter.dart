@@ -27,6 +27,7 @@ part 'src/command/effect_command_transition.dart';
 part 'src/command/effect_commands.dart';
 part 'src/context/build_context_extensions.dart';
 part 'src/scope/better_effect_bootstrap.dart';
+part 'src/scope/better_effect_feature_scope.dart';
 part 'src/scope/better_effect_lifecycle.dart';
 part 'src/scope/better_effect_provider.dart';
 part 'src/scope/better_effect_scope.dart';

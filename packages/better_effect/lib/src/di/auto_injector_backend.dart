@@ -138,7 +138,7 @@ final class AutoInjectorBackend
   @override
   ResolverBackend createExecutionOverlay() {
     _ensureOpen();
-    return AutoInjectorBackend._executionOverlay(_injector);
+    return AutoInjectorBackend._executionOverlay(_commitInjector);
   }
 
   @override

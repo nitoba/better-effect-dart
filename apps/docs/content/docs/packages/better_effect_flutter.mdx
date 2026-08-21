@@ -12,7 +12,8 @@ peças de apresentação:
 - `EffectCommand` para execuções, concorrência, cancelamento e retry;
 - `EffectCommandBuilder` para renderizar estado;
 - `EffectCommandListener` para efeitos de uma única vez;
-- `BetterEffectScope` e `runBetterEffectApp` para iniciar o runtime.
+- `BetterEffectScope` e `runBetterEffectApp` para iniciar o runtime;
+- `BetterEffectFeatureScope` para um child Runtime pertencente a uma feature.
 
 O package não tenta ser mais um framework de estado. A motivação é dar uma
 ponte precisa entre o modelo de execução do core e o modelo de reconstrução do
@@ -99,6 +100,34 @@ usam `ExitInterrupted`, sem inventar falhas de domínio.
 
 Consulte o [guia de políticas de Command](../guides/command-policies).
 
+## Runtime por feature
+
+Uma feature pode precisar de resources compartilhados por várias telas ou
+ViewModels, mas que não devem viver pelo app inteiro:
+
+```dart
+BetterEffectFeatureScope(
+  module: checkoutModule,
+  label: 'checkout',
+  loadingBuilder: (_) => const CheckoutSplash(),
+  errorBuilder: (context, error, stackTrace, retry) {
+    return CheckoutStartupError(onRetry: retry);
+  },
+  builder: (_) => const CheckoutFlow(),
+)
+```
+
+O scope cria um child Runtime usando o Runtime mais próximo como pai. Serviços
+da feature têm precedência e os demais usam fallback para o pai. O child fecha
+no dispose/restart sem fechar o Runtime da aplicação.
+
+ViewModels dentro do subtree recebem o `EffectCommands` desse child Runtime. Se
+o ambiente da feature for substituído, o Commands boundary também muda e
+ViewModels owned são recriados automaticamente.
+
+Consulte [Feature scopes](../guides/feature-scopes) para lifecycle, nesting,
+retry de startup, observabilidade e integração com o analyzer.
+
 Veja o [guia de Flutter MVVM](../guides/flutter-mvvm) e o exemplo incluído em
 `packages/better_effect_flutter/example`.
 
@@ -107,12 +136,12 @@ Veja o [guia de Flutter MVVM](../guides/flutter-mvvm) e o exemplo incluído em
 | Situação | API |
 | --- | --- |
 | App possui o root Flutter | `runBetterEffectApp` |
-| Feature, preview ou add-to-app inicializa async | `BetterEffectBootstrap` |
+| Feature precisa de ambiente próprio com fallback | `BetterEffectFeatureScope` |
+| Feature, preview ou add-to-app inicializa um Runtime independente | `BetterEffectBootstrap` |
 | Runtime já tem outro owner | `BetterEffectProvider.value` |
 | ViewModel usa `ChangeNotifier` próprio | `EffectCommandOwner` |
 | View só renderiza estado | `EffectCommandBuilder` |
 | View faz navegação/snackbar/analytics | `EffectCommandListener` |
-
 
 ## Seleção tipada e rebuild filtering
 

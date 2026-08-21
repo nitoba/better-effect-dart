@@ -1,5 +1,13 @@
 ## Unreleased
 
+- Added `Runtime.fork` for feature-length child environments with local-first
+  resolution and parent fallback.
+- Child Module resources survive multiple executions, close exactly once with
+  the child Runtime, and are coordinated before parent resources during parent
+  shutdown.
+- Runtime observer contexts now expose `runtimeId`, `parentRuntimeId`, and
+  `runtimeLabel` so feature and execution boundaries can be correlated.
+- Nested execution overlays preserve the complete parent fallback chain.
 - Added typed-failure `Effect.retry` with `none`, fixed, linear, and
   exponential policies, optional full jitter, maximum delays, and
   explicit attempt-count semantics.

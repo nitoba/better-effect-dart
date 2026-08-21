@@ -146,17 +146,12 @@ final class BetterEffectGraphAnalysis {
 }
 
 /// Resolves the Dart package and validates complete better_effect Module roots.
-///
-/// This checker complements the IDE plugin. A normal analysis rule sees one
-/// library at a time, while service implementations and their root Modules are
-/// often declared in different libraries.
 final class BetterEffectGraphChecker {
   BetterEffectGraphChecker(String rootPath)
     : rootPath = p.normalize(p.absolute(rootPath));
 
   final String rootPath;
 
-  /// Analyze diagnostics and build the immutable public dependency graph.
   Future<BetterEffectGraphAnalysis> analyze({
     GraphCheckOptions options = const GraphCheckOptions(),
   }) async {
@@ -194,10 +189,8 @@ final class BetterEffectGraphChecker {
     try {
       for (final context in collection.contexts) {
         final files = context.contextRoot.analyzedFiles().toList()..sort();
-
         for (final filePath in files) {
           if (!_shouldAnalyze(filePath, options)) continue;
-
           final result = await context.currentSession.getResolvedUnit(filePath);
           if (result is ResolvedUnitResult) {
             index.addUnit(result);
@@ -237,14 +230,12 @@ final class BetterEffectGraphChecker {
     }
   }
 
-  /// Compatibility wrapper returning the existing diagnostic-only result.
   Future<GraphCheckResult> check({
     GraphCheckOptions options = const GraphCheckOptions(),
   }) async {
     return (await analyze(options: options)).checkResult;
   }
 
-  /// Build only the reusable public graph.
   Future<BetterEffectGraph> graph({
     GraphCheckOptions options = const GraphCheckOptions(),
   }) async {
@@ -253,10 +244,8 @@ final class BetterEffectGraphChecker {
 
   bool _shouldAnalyze(String filePath, GraphCheckOptions options) {
     if (!filePath.endsWith('.dart')) return false;
-
     final normalized = p.normalize(filePath);
     if (!p.isWithin(rootPath, normalized)) return false;
-
     return !options.excludedSuffixes.any(normalized.endsWith);
   }
 }
@@ -268,6 +257,19 @@ final class _ProjectIndex {
   final Map<String, _ClassInfo> classes = <String, _ClassInfo>{};
   final Map<String, _ModuleInfo> modules = <String, _ModuleInfo>{};
   final Set<String> executionModuleIds = <String>{};
+  final Set<String> childRuntimeModuleIds = <String>{};
+  final Set<String> applicationRuntimeModuleIds = <String>{};
+  final Map<String, _KnownRuntimeEnvironment> runtimeEnvironments =
+      <String, _KnownRuntimeEnvironment>{};
+  final List<_ChildRuntimeUse> childRuntimeUses = <_ChildRuntimeUse>[];
+
+  bool _isScopedEnvironmentModule(String id) {
+    if (executionModuleIds.contains(id)) return true;
+    if (!childRuntimeModuleIds.contains(id)) return false;
+    final module = modules[id];
+    if (module?.isComplete ?? false) return false;
+    return !applicationRuntimeModuleIds.contains(id);
+  }
 
   void addUnit(ResolvedUnitResult result) {
     result.unit.accept(_UnitCollector(result, this));
@@ -304,30 +306,24 @@ final class _ProjectIndex {
       (module) =>
           _isCompleteRoot(module) &&
           !referencedModules.contains(module.id) &&
-          !executionModuleIds.contains(module.id),
+          !_isScopedEnvironmentModule(module.id),
     );
     final hasExplicitRoots = explicitRoots.isNotEmpty;
     final roots = modules.values.where((module) {
-      if (moduleNames.isNotEmpty) {
-        return moduleNames.contains(module.name);
-      }
+      if (moduleNames.isNotEmpty) return moduleNames.contains(module.name);
       if (hasExplicitRoots) {
         return _isCompleteRoot(module) &&
             !referencedModules.contains(module.id) &&
-            !executionModuleIds.contains(module.id);
+            !_isScopedEnvironmentModule(module.id);
       }
       return !referencedModules.contains(module.id) &&
-          !executionModuleIds.contains(module.id);
+          !_isScopedEnvironmentModule(module.id);
     });
 
     for (final root in roots) {
       yield* _validateModule(root);
     }
 
-    // Runtime.runWith/runExitWith/executeWith Modules are overlays. Their
-    // unresolved requirements may be supplied by the long-lived root Runtime,
-    // while duplicate, incompatible, cyclic and local resource-order defects
-    // remain independently valid.
     if (moduleNames.isEmpty) {
       for (final id in executionModuleIds) {
         final module = modules[id];
@@ -335,7 +331,68 @@ final class _ProjectIndex {
           yield* _validateModule(module, allowExternalRequirements: true);
         }
       }
+
+      for (final id in childRuntimeModuleIds) {
+        final module = modules[id];
+        if (module != null) {
+          yield* _validateModule(module, allowExternalRequirements: true);
+        }
+      }
+
+      final validatedUses = <String>{};
+      for (final use in childRuntimeUses) {
+        final parent = use.parentEnvironment;
+        if (parent == null || !parent.isComplete) continue;
+        final signature = '${use.childModuleId}|${parent.moduleIds.join('|')}';
+        if (!validatedUses.add(signature)) continue;
+        yield* _validateKnownChildRuntimeRequirements(use);
+      }
     }
+  }
+
+  Iterable<GraphDiagnostic> _validateKnownChildRuntimeRequirements(
+    _ChildRuntimeUse use,
+  ) sync* {
+    final child = modules[use.childModuleId];
+    final parentEnvironment = use.parentEnvironment;
+    if (child == null || parentEnvironment == null) return;
+
+    final childProviders = _effectiveProviders(child);
+    final parentProviders = <String, _ProviderInfo>{};
+    for (final parentModuleId in parentEnvironment.moduleIds.reversed) {
+      final parentModule = modules[parentModuleId];
+      if (parentModule == null) continue;
+      parentProviders.addAll(_effectiveProviders(parentModule));
+    }
+
+    final parentNames = parentEnvironment.moduleIds
+        .map((id) => modules[id]?.name ?? id)
+        .join(' -> ');
+
+    for (final provider in childProviders.values) {
+      for (final dependency in _providerDependencies(provider)) {
+        if (childProviders.containsKey(dependency.identity) ||
+            parentProviders.containsKey(dependency.identity)) {
+          continue;
+        }
+
+        yield _diagnostic(
+          code: 'missing_service',
+          message:
+              "Provider '${provider.service.display}' requires '${dependency.display}', but child Module '${child.name}' and known parent environment '$parentNames' don't provide it.",
+          location: dependency.location ?? provider.location,
+        );
+      }
+    }
+  }
+
+  Map<String, _ProviderInfo> _effectiveProviders(_ModuleInfo module) {
+    final projected =
+        <String, ({_ProviderInfo provider, String declaredModuleId})>{};
+    _flattenGraphModule(module, projected, <String>{});
+    return <String, _ProviderInfo>{
+      for (final entry in projected.entries) entry.key: entry.value.provider,
+    };
   }
 
   BetterEffectGraph buildGraph({
@@ -362,9 +419,7 @@ final class _ProjectIndex {
         final declaredModuleId = entry.value.declaredModuleId;
         final providerId = '${module.id}::${provider.service.identity}';
         providerIds.add(providerId);
-        if (declaredModuleId == module.id) {
-          declaredProviderIds.add(providerId);
-        }
+        if (declaredModuleId == module.id) declaredProviderIds.add(providerId);
         _registerGraphService(graphServices, provider.service);
 
         final dependencies =
@@ -444,6 +499,7 @@ final class _ProjectIndex {
           location: _publicLocation(module.location),
           isComplete: _isCompleteRoot(module),
           isExecutionOverlay: executionModuleIds.contains(module.id),
+          isChildRuntimeModule: childRuntimeModuleIds.contains(module.id),
           isOverride: module.isOverride,
           rootKind: rootKinds[module.id],
           baseModuleId: module.baseModuleId,
@@ -517,7 +573,7 @@ final class _ProjectIndex {
           (module) =>
               _isCompleteRoot(module) &&
               !referenced.contains(module.id) &&
-              !executionModuleIds.contains(module.id),
+              !_isScopedEnvironmentModule(module.id),
         )
         .toList();
     if (complete.isNotEmpty) {
@@ -530,7 +586,7 @@ final class _ProjectIndex {
     return <String, BetterEffectGraphRootKind>{
       for (final module in modules.values)
         if (!referenced.contains(module.id) &&
-            !executionModuleIds.contains(module.id))
+            !_isScopedEnvironmentModule(module.id))
           module.id: BetterEffectGraphRootKind.inferred,
     };
   }
@@ -540,9 +596,7 @@ final class _ProjectIndex {
     for (final module in modules.values) {
       referenced.addAll(module.includedModuleIds);
       final base = module.baseModuleId;
-      if (base != null) {
-        referenced.add(base);
-      }
+      if (base != null) referenced.add(base);
     }
     return referenced;
   }
@@ -572,6 +626,9 @@ final class _ProjectIndex {
     for (final executionModule in executionModuleIds) {
       visit(executionModule);
     }
+    for (final childRuntimeModule in childRuntimeModuleIds) {
+      visit(childRuntimeModule);
+    }
 
     return modules.keys.toSet().difference(reachable);
   }
@@ -585,15 +642,11 @@ final class _ProjectIndex {
     final baseId = module.baseModuleId;
     if (baseId != null) {
       final base = modules[baseId];
-      if (base != null) {
-        _flattenGraphModule(base, target, visiting);
-      }
+      if (base != null) _flattenGraphModule(base, target, visiting);
     }
     for (final includedId in module.includedModuleIds) {
       final included = modules[includedId];
-      if (included != null) {
-        _flattenGraphModule(included, target, visiting);
-      }
+      if (included != null) _flattenGraphModule(included, target, visiting);
     }
     for (final provider in module.providers) {
       target[provider.service.identity] = (
@@ -622,9 +675,7 @@ final class _ProjectIndex {
 
   String? _graphKeyName(String keyId) {
     if (keyId == '<default>') return null;
-    if (keyId.startsWith('source:')) {
-      return keyId.substring('source:'.length);
-    }
+    if (keyId.startsWith('source:')) return keyId.substring('source:'.length);
     final hash = keyId.lastIndexOf('#');
     final value = hash < 0 ? keyId : keyId.substring(hash + 1);
     final dot = value.lastIndexOf('.');
@@ -676,23 +727,16 @@ final class _ProjectIndex {
       for (final provider in module.providers) {
         final identity = provider.service.identity;
         final previous = flattened[identity];
-
         if (previous != null && !module.isOverride) {
           yield _diagnostic(
             code: 'duplicate_service_binding',
             message:
-                "Service '${provider.service.display}' is provided more than "
-                "once in Module '${root.name}'.",
+                "Service '${provider.service.display}' is provided more than once in Module '${root.name}'.",
             location: provider.location,
           );
         }
-
-        // Updating an existing LinkedHashMap key preserves its position. This
-        // mirrors Module.overrideWith: replacements stay where the base binding
-        // was declared, while new identities are appended.
         flattened[identity] = provider;
       }
-
       expansionStack.remove(module.id);
     }
 
@@ -709,8 +753,7 @@ final class _ProjectIndex {
         yield _diagnostic(
           code: 'incompatible_provider',
           message:
-              "Implementation '${implementation.display}' can't be registered "
-              "as '${provider.service.display}'.",
+              "Implementation '${implementation.display}' can't be registered as '${provider.service.display}'.",
           location: provider.location,
         );
       }
@@ -722,9 +765,7 @@ final class _ProjectIndex {
           yield _diagnostic(
             code: 'missing_service',
             message:
-                "Provider '${provider.service.display}' requires "
-                "'${dependency.display}', but Module '${root.name}' doesn't "
-                'provide it.',
+                "Provider '${provider.service.display}' requires '${dependency.display}', but Module '${root.name}' doesn't provide it.",
             location: dependency.location ?? provider.location,
           );
         }
@@ -741,13 +782,10 @@ final class _ProjectIndex {
 
   bool _isCompleteRoot(_ModuleInfo module, [Set<String>? visiting]) {
     if (module.isComplete) return true;
-
     final baseId = module.baseModuleId;
     if (baseId == null) return false;
-
     final seen = visiting ?? <String>{};
     if (!seen.add(module.id)) return false;
-
     final base = modules[baseId];
     return base != null && _isCompleteRoot(base, seen);
   }
@@ -766,10 +804,9 @@ final class _ProjectIndex {
     }
 
     final entries = providers.keys
-        .where((identity) => !referenced.contains(identity))
+        .where((id) => !referenced.contains(id))
         .toList();
     if (entries.isEmpty) entries.addAll(providers.keys);
-
     final queue = <List<_ServiceRef>>[
       for (final entry in entries) <_ServiceRef>[providers[entry]!.service],
     ];
@@ -780,7 +817,6 @@ final class _ProjectIndex {
       final path = queue.removeAt(0);
       final current = providers[path.last.identity];
       if (current == null) continue;
-
       final signature = path.map((item) => item.identity).join(' -> ');
       if (!visitedPaths.add(signature)) continue;
 
@@ -795,14 +831,11 @@ final class _ProjectIndex {
           yield _diagnostic(
             code: 'missing_service',
             message:
-                "Complete Module '${root.name}' is incomplete. "
-                "Dependency path: $displayPath reaches missing service "
-                "'${dependency.display}'.",
+                "Complete Module '${root.name}' is incomplete. Dependency path: $displayPath reaches missing service '${dependency.display}'.",
             location: root.location,
           );
           continue;
         }
-
         if (!path.any((item) => item.identity == target.service.identity)) {
           queue.add(<_ServiceRef>[...path, target.service]);
         }
@@ -815,7 +848,6 @@ final class _ProjectIndex {
       ...provider.constructorDependencies,
       ...provider.inlineDependencies,
     };
-
     final implementationId = provider.implementation?.baseElementId;
     if (implementationId != null) {
       final implementationClass = classes[implementationId];
@@ -823,7 +855,6 @@ final class _ProjectIndex {
         dependencies.addAll(implementationClass.dependencies);
       }
     }
-
     return dependencies;
   }
 
@@ -847,7 +878,6 @@ final class _ProjectIndex {
       for (final dependency in _providerDependencies(current)) {
         final target = providers[dependency.identity];
         if (target == null) continue;
-
         final nextPath = <_ServiceRef>[...path, dependency];
         final ownerPosition = positions[owner.service.identity]!;
         final targetPosition = positions[target.service.identity]!;
@@ -862,23 +892,15 @@ final class _ProjectIndex {
             yield _diagnostic(
               code: 'resource_dependency_declared_after_provider',
               message:
-                  "Resource '${owner.service.display}' requires "
-                  "'${target.service.display}' during startup, but that "
-                  "resource is acquired later in Module '${root.name}'. "
-                  'Dependency path: $displayPath.',
+                  "Resource '${owner.service.display}' requires '${target.service.display}' during startup, but that resource is acquired later in Module '${root.name}'. Dependency path: $displayPath.",
               location: dependency.location ?? owner.location,
             );
           }
           continue;
         }
-
-        // A resource already acquired before the owner has a valid startup
-        // state. Constructor-backed providers still need traversal because they
-        // can hide a transitive dependency on a later resource.
         if (target.isResource || !visiting.add(target.service.identity)) {
           continue;
         }
-
         yield* visit(owner, target, nextPath, visiting);
         visiting.remove(target.service.identity);
       }
@@ -914,19 +936,16 @@ final class _ProjectIndex {
     Iterable<GraphDiagnostic> visit(String identity) sync* {
       state[identity] = 1;
       stack.add(identity);
-
       final provider = providers[identity]!;
       for (final dependency in dependenciesOf(provider)) {
         if (state[dependency] == 1) {
           final start = stack.indexOf(dependency);
           final cycle = <String>[...stack.sublist(start), dependency];
           final signature = cycle.join(' -> ');
-
           if (emitted.add(signature)) {
             final names = cycle
                 .map((item) => providers[item]?.service.display ?? item)
                 .join(' -> ');
-
             yield _diagnostic(
               code: 'dependency_cycle',
               message: "Dependency cycle in Module '${root.name}': $names.",
@@ -935,20 +954,14 @@ final class _ProjectIndex {
           }
           continue;
         }
-
-        if (state[dependency] != 2) {
-          yield* visit(dependency);
-        }
+        if (state[dependency] != 2) yield* visit(dependency);
       }
-
       stack.removeLast();
       state[identity] = 2;
     }
 
     for (final identity in providers.keys) {
-      if (state[identity] == null) {
-        yield* visit(identity);
-      }
+      if (state[identity] == null) yield* visit(identity);
     }
   }
 
@@ -1002,6 +1015,16 @@ final class _UnitCollector extends RecursiveAstVisitor<void> {
   }
 
   @override
+  void visitVariableDeclaration(VariableDeclaration node) {
+    final environment = _runtimeEnvironmentFromExpression(node.initializer);
+    final elementId = elementIdentity(node.declaredFragment?.element);
+    if (environment != null && elementId != null) {
+      index.runtimeEnvironments[elementId] = environment;
+    }
+    super.visitVariableDeclaration(node);
+  }
+
+  @override
   void visitDotShorthandInvocation(DotShorthandInvocation node) {
     _collectClassDependency(node);
     super.visitDotShorthandInvocation(node);
@@ -1021,18 +1044,16 @@ final class _UnitCollector extends RecursiveAstVisitor<void> {
         isModuleType(node.staticType)) {
       _collectOverrideModule(node);
     }
-
-    if (_isExecutionModuleInvocation(node)) {
-      _collectExecutionModule(node);
-    }
+    if (_isExecutionModuleInvocation(node)) _collectExecutionModule(node);
+    if (_isRuntimeStartInvocation(node)) _collectRuntimeStartModule(node);
+    if (_isChildRuntimeInvocation(node)) _collectChildRuntimeModule(node);
     super.visitMethodInvocation(node);
   }
 
   @override
   void visitInstanceCreationExpression(InstanceCreationExpression node) {
-    if (isModuleType(node.staticType)) {
-      _collectModule(node);
-    }
+    if (isModuleType(node.staticType)) _collectModule(node);
+    if (_isFeatureScopeCreation(node)) _collectFeatureScopeModule(node);
     super.visitInstanceCreationExpression(node);
   }
 
@@ -1048,11 +1069,104 @@ final class _UnitCollector extends RecursiveAstVisitor<void> {
   void _collectExecutionModule(MethodInvocation node) {
     final first = _firstPositionalArgument(node.argumentList);
     if (first is! Expression) return;
-
     final id = _executionModuleId(first);
-    if (id != null) {
-      index.executionModuleIds.add(id);
+    if (id != null) index.executionModuleIds.add(id);
+  }
+
+  bool _isRuntimeStartInvocation(MethodInvocation node) {
+    return node.methodName.name == 'start' &&
+        isModuleType(node.target?.staticType);
+  }
+
+  void _collectRuntimeStartModule(MethodInvocation node) {
+    final moduleId = _moduleExpressionId(node.target);
+    if (moduleId != null) index.applicationRuntimeModuleIds.add(moduleId);
+  }
+
+  bool _isChildRuntimeInvocation(MethodInvocation node) {
+    return node.methodName.name == 'fork' &&
+        isRuntimeType(node.target?.staticType);
+  }
+
+  void _collectChildRuntimeModule(MethodInvocation node) {
+    final first = _firstPositionalArgument(node.argumentList);
+    if (first is! Expression) return;
+    final id = _executionModuleId(first);
+    if (id == null) return;
+
+    index.childRuntimeModuleIds.add(id);
+    index.childRuntimeUses.add(
+      _ChildRuntimeUse(
+        childModuleId: id,
+        parentEnvironment: _runtimeEnvironmentFromExpression(node.target),
+        location: _location(node.offset, node.length),
+      ),
+    );
+  }
+
+  bool _isFeatureScopeCreation(InstanceCreationExpression node) {
+    return node.constructorName.type.toSource().split('.').last ==
+        'BetterEffectFeatureScope';
+  }
+
+  void _collectFeatureScopeModule(InstanceCreationExpression node) {
+    for (final argument in node.argumentList.arguments) {
+      if (argument is NamedExpression && argument.name.label.name == 'module') {
+        final id = _executionModuleId(argument.expression);
+        if (id != null) index.childRuntimeModuleIds.add(id);
+        return;
+      }
     }
+  }
+
+  _KnownRuntimeEnvironment? _runtimeEnvironmentFromExpression(
+    Expression? expression,
+  ) {
+    final value = _unwrapRuntimeExpression(expression);
+    if (value == null) return null;
+
+    final referencedId = elementIdentity(referencedElement(value));
+    if (referencedId != null) {
+      final environment = index.runtimeEnvironments[referencedId];
+      if (environment != null) return environment;
+    }
+
+    if (value is! MethodInvocation) return null;
+
+    if (_isRuntimeStartInvocation(value)) {
+      final moduleId = _moduleExpressionId(value.target);
+      if (moduleId == null) return null;
+      index.applicationRuntimeModuleIds.add(moduleId);
+      return _KnownRuntimeEnvironment(
+        moduleIds: <String>[moduleId],
+        isComplete: true,
+      );
+    }
+
+    if (_isChildRuntimeInvocation(value)) {
+      final first = _firstPositionalArgument(value.argumentList);
+      if (first is! Expression) return null;
+      final childModuleId = _executionModuleId(first);
+      if (childModuleId == null) return null;
+      final parent = _runtimeEnvironmentFromExpression(value.target);
+      return _KnownRuntimeEnvironment(
+        moduleIds: <String>[
+          childModuleId,
+          if (parent != null) ...parent.moduleIds,
+        ],
+        isComplete: parent?.isComplete ?? false,
+      );
+    }
+
+    return null;
+  }
+
+  Expression? _unwrapRuntimeExpression(Expression? expression) {
+    Expression? value = expression?.unParenthesized;
+    while (value is AwaitExpression) {
+      value = value.expression.unParenthesized;
+    }
+    return value;
   }
 
   String? _executionModuleId(Expression expression) {
@@ -1063,7 +1177,6 @@ final class _UnitCollector extends RecursiveAstVisitor<void> {
         expression,
       ).id;
     }
-
     if (expression is MethodInvocation &&
         expression.methodName.name == 'overrideWith' &&
         isModuleType(expression.staticType)) {
@@ -1074,14 +1187,12 @@ final class _UnitCollector extends RecursiveAstVisitor<void> {
         baseModuleId: _moduleExpressionId(expression.target),
       ).id;
     }
-
     return _moduleExpressionId(expression);
   }
 
   VariableDeclaration? _moduleDeclarationFor(AstNode node) {
     final declaration = node.thisOrAncestorOfType<VariableDeclaration>();
     if (declaration == null) return null;
-
     return identical(declaration.initializer?.unParenthesized, node)
         ? declaration
         : null;
@@ -1090,10 +1201,8 @@ final class _UnitCollector extends RecursiveAstVisitor<void> {
   void _collectClassDependency(AstNode node) {
     final classId = _currentClassId;
     if (classId == null) return;
-
     final request = serviceRequestFromNode(node);
     if (request == null) return;
-
     index.classes[classId]?.dependencies.add(
       _ServiceRef.fromType(
         request.serviceType,
@@ -1146,11 +1255,8 @@ final class _UnitCollector extends RecursiveAstVisitor<void> {
     );
     if (module.collected) return;
     module.collected = true;
-
     final first = _firstPositionalArgument(node.argumentList);
-    if (first is ListLiteral) {
-      _collectModuleElements(first, module);
-    }
+    if (first is ListLiteral) _collectModuleElements(first, module);
   }
 
   _ModuleInfo _moduleForDeclaration(
@@ -1186,7 +1292,6 @@ final class _UnitCollector extends RecursiveAstVisitor<void> {
         if (includedId != null) module.includedModuleIds.add(includedId);
         continue;
       }
-
       final binding = bindingCallFromNode(element);
       if (binding != null) {
         final provider = _providerFrom(binding);
@@ -1237,7 +1342,6 @@ final class _UnitCollector extends RecursiveAstVisitor<void> {
               result.typeSystem.isNullable(parameter.type)) {
             continue;
           }
-
           constructorDependencies.add(
             _ServiceRef.fromType(
               parameter.type,
@@ -1254,16 +1358,17 @@ final class _UnitCollector extends RecursiveAstVisitor<void> {
     if (binding.name == 'resource') {
       final acquire = binding.namedArgument('acquire');
       if (acquire != null) {
-        final collector = _InlineDependencyCollector((node, request) {
-          inlineDependencies.add(
-            _ServiceRef.fromType(
-              request.serviceType,
-              keyId: request.keyId,
-              location: _location(node.offset, node.length),
-            ),
-          );
-        });
-        acquire.accept(collector);
+        acquire.accept(
+          _InlineDependencyCollector((node, request) {
+            inlineDependencies.add(
+              _ServiceRef.fromType(
+                request.serviceType,
+                keyId: request.keyId,
+                location: _location(node.offset, node.length),
+              ),
+            );
+          }),
+        );
       }
     }
 
@@ -1289,7 +1394,6 @@ final class _UnitCollector extends RecursiveAstVisitor<void> {
     final reference = elementIdentity(referenced);
     if (reference != null) {
       if (index.modules.containsKey(reference)) return reference;
-
       final referenceName = switch (value) {
         SimpleIdentifier(:final name) => name,
         PrefixedIdentifier(:final identifier) => identifier.name,
@@ -1307,7 +1411,6 @@ final class _UnitCollector extends RecursiveAstVisitor<void> {
             .toList();
         if (matches.length == 1) return matches.single.id;
       }
-
       return reference;
     }
 
@@ -1330,15 +1433,12 @@ final class _UnitCollector extends RecursiveAstVisitor<void> {
         baseModuleId: _moduleExpressionId(value.target),
       ).id;
     }
-
     return null;
   }
 
   Expression? _firstPositionalArgument(ArgumentList list) {
     for (final argument in list.arguments) {
-      if (argument is! NamedExpression) {
-        return argument;
-      }
+      if (argument is! NamedExpression) return argument;
     }
     return null;
   }
@@ -1387,6 +1487,28 @@ final class _ClassInfo {
   final _ServiceRef type;
   final _SourceLocation location;
   final Set<_ServiceRef> dependencies = <_ServiceRef>{};
+}
+
+final class _KnownRuntimeEnvironment {
+  const _KnownRuntimeEnvironment({
+    required this.moduleIds,
+    required this.isComplete,
+  });
+
+  final List<String> moduleIds;
+  final bool isComplete;
+}
+
+final class _ChildRuntimeUse {
+  const _ChildRuntimeUse({
+    required this.childModuleId,
+    required this.parentEnvironment,
+    required this.location,
+  });
+
+  final String childModuleId;
+  final _KnownRuntimeEnvironment? parentEnvironment;
+  final _SourceLocation location;
 }
 
 final class _ModuleInfo {

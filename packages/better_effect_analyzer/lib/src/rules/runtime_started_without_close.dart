@@ -6,8 +6,9 @@ import 'package:analyzer/dart/ast/visitor.dart';
 import 'package:analyzer/error/error.dart';
 
 import '../support/lifecycle_analysis.dart';
+import '../support/type_utils.dart';
 
-/// Reports locally started Runtimes with no statically visible owner.
+/// Reports locally created Runtimes with no statically visible owner.
 final class RuntimeStartedWithoutCloseRule extends AnalysisRule {
   RuntimeStartedWithoutCloseRule()
     : super(name: code.name, description: code.problemMessage);
@@ -38,7 +39,12 @@ final class _Visitor extends SimpleAstVisitor<void> {
 
   @override
   void visitMethodInvocation(MethodInvocation node) {
-    if (isRuntimeStartInvocation(node) && !runtimeStartHasKnownOwner(node)) {
+    final isRuntimeFork =
+        node.methodName.name == 'fork' &&
+        isRuntimeType(node.target?.staticType);
+    final createsRuntime = isRuntimeStartInvocation(node) || isRuntimeFork;
+
+    if (createsRuntime && !runtimeStartHasKnownOwner(node)) {
       rule.reportAtNode(node);
     }
   }

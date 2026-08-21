@@ -12,6 +12,7 @@ description: Effects, dependency injection, scopes, recursos e observabilidade p
 - `Effect.retry` para falhas tipadas com policies e um Scope por tentativa;
 - `Module` para declarar serviços, lifetimes e resources;
 - `Runtime` e `Scope` para controlar execução e ciclo de vida;
+- `Runtime.fork` para ambientes de feature com fallback para um Runtime pai;
 - `EffectExecution` para interrupção cooperativa e ownership físico;
 - `EffectLocal` para contexto por execução;
 - `RuntimeObserver` para logs, métricas, tracing e diagnóstico operacional.
@@ -175,6 +176,35 @@ final exit = await runtime.runExitWith(
 O ambiente local resolve seus próprios bindings primeiro e usa o Runtime raiz
 como fallback. Nada é registrado globalmente.
 
+## Child Runtimes para features
+
+Quando o lifetime precisa durar mais que uma execução, mas menos que a aplicação,
+crie um Runtime filho:
+
+```dart
+final checkoutRuntime = await runtime.fork(
+  checkoutModule,
+  label: 'checkout',
+);
+
+try {
+  await checkoutRuntime.run(loadCheckout);
+  await checkoutRuntime.run(validateCheckout);
+} finally {
+  await checkoutRuntime.close();
+}
+```
+
+Bindings do filho têm precedência e serviços ausentes usam o Runtime pai como
+fallback. Resources do Module da feature sobrevivem às duas execuções acima e
+fecham quando `checkoutRuntime` fecha.
+
+Fechar o filho nunca fecha o pai. Fechar o pai coordena seus filhos antes de
+liberar resources parentais. `runWith` dentro de um child Runtime cria uma camada
+ainda mais curta sem perder a cadeia de fallback.
+
+Consulte [Feature scopes](../guides/feature-scopes) para o equivalente Flutter.
+
 ## Execuções gerenciadas
 
 ```dart
@@ -202,6 +232,10 @@ final runtime = await module.start(
 Observers podem acompanhar execuções, resolução de dependências, aquisição,
 release, interrupção e falhas de cleanup. As falhas do próprio observer são
 isoladas e não alteram o resultado dos Effects.
+
+Em child Runtimes, `RuntimeEventContext` também identifica o Runtime owner, o
+Runtime pai e a label da feature por `runtimeId`, `parentRuntimeId` e
+`runtimeLabel`.
 
 Use `EffectLocal.metadata` para request IDs, trace IDs e outros campos seguros:
 
@@ -243,6 +277,7 @@ diferentes.
 - [Retry determinístico](../guides/retry)
 - [Recursos e ciclo de vida](../guides/resources-and-lifetimes)
 - [Modules por execução](../guides/execution-scoped-modules)
+- [Feature scopes](../guides/feature-scopes)
 - [Observabilidade](../guides/observability)
 - [Testando Effects e Commands](../guides/testing)
 - [API do package no pub.dev](https://pub.dev/packages/better_effect)
