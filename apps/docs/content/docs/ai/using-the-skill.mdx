@@ -1,0 +1,181 @@
+---
+title: Usando a skill
+description: Instalação, atualização e boas práticas para usar a skill oficial better-effect com coding agents
+---
+
+A skill oficial do projeto vive em `skills/better-effect` neste repositório e
+segue o formato aberto de Agent Skills. Ela pode ser instalada com a CLI
+`skills`, mantida pela Vercel Labs, em agentes compatíveis como Codex, Claude
+Code, Cursor, OpenCode e outros.
+
+## Instalar no projeto
+
+A instalação padrão é local ao projeto atual:
+
+```bash
+npx skills add nitoba/better-effect-dart --skill better-effect
+```
+
+Esse é o modo recomendado quando a skill faz parte das convenções de uma equipe
+ou de um repositório específico.
+
+Para conferir o que o repositório publica antes de instalar:
+
+```bash
+npx skills add nitoba/better-effect-dart --list
+```
+
+## Instalar globalmente
+
+Se você trabalha com `better_effect` em vários projetos, pode instalar a skill
+no escopo do usuário:
+
+```bash
+npx skills add nitoba/better-effect-dart --skill better-effect -g
+```
+
+Para direcionar a instalação a um agente específico:
+
+```bash
+npx skills add nitoba/better-effect-dart \
+  --skill better-effect \
+  -g \
+  -a codex
+```
+
+A CLI também aceita múltiplos agentes, por exemplo:
+
+```bash
+npx skills add nitoba/better-effect-dart \
+  --skill better-effect \
+  -a codex \
+  -a claude-code \
+  -a cursor
+```
+
+## Usar sem instalar
+
+Para gerar o contexto da skill temporariamente sem manter uma instalação:
+
+```bash
+npx skills use nitoba/better-effect-dart@better-effect
+```
+
+Também é possível iniciar diretamente um agente suportado pela CLI:
+
+```bash
+npx skills use nitoba/better-effect-dart@better-effect --agent claude-code
+```
+
+Use esse modo para experimentar a skill ou para uma sessão isolada.
+
+## Atualizar
+
+Quando a skill evoluir no repositório:
+
+```bash
+npx skills update better-effect
+```
+
+Para atualizar todas as skills instaladas:
+
+```bash
+npx skills update
+```
+
+## Como pedir trabalho ao agente
+
+A skill fornece as regras da biblioteca, mas o prompt ainda deve explicar o
+**objetivo da aplicação** e o **escopo da mudança**.
+
+Um bom pedido normalmente contém quatro coisas:
+
+1. **contexto** — qual feature, fluxo ou problema está sendo trabalhado;
+2. **objetivo** — o resultado que deve existir ao final;
+3. **restrições** — comportamento que precisa ser preservado, APIs que não devem
+   mudar, dependências que não devem ser adicionadas;
+4. **critério de conclusão** — analyze/test/build, arquivos que precisam ser
+   atualizados ou cenários que precisam continuar funcionando.
+
+Exemplo:
+
+```text
+Use a skill better-effect.
+
+Refatore a feature de autenticação deste app Flutter. Ela já usa
+better_effect_flutter, mas ainda mantém isLoading/error manual no ViewModel e
+faz navegação dentro do builder.
+
+Preserve o contrato público dos repositories e a UX atual. Quero que o fluxo
+use EffectCommandState, listener one-shot para navegação e uma policy correta
+para impedir submit duplicado.
+
+Mapeie todas as ocorrências da feature, implemente a refatoração completa e só
+considere concluído depois de rodar flutter analyze e os testes afetados.
+```
+
+## Não peça “use tudo da biblioteca”
+
+Um pedido como este tende a produzir overengineering:
+
+```text
+Use todos os recursos de better_effect neste projeto.
+```
+
+Prefira explicar o problema:
+
+```text
+Revise o lifecycle dos clients e transactions. Quero que cada resource tenha um
+owner explícito e que o Runtime não seja recriado por operação.
+```
+
+A skill foi escrita para selecionar a ferramenta adequada, não para maximizar o
+número de APIs utilizadas.
+
+## Dê acesso ao projeto real
+
+Para refatoração e debugging, o agente precisa conseguir ler pelo menos:
+
+- `pubspec.yaml` e lockfile;
+- os arquivos da feature;
+- composition root/Module/Runtime;
+- testes relevantes.
+
+Isso é importante porque a skill trata a versão **instalada** como fonte de
+verdade. Se o projeto usa uma versão antiga ou uma path dependency, o agente não
+deve assumir a API atual de `main`.
+
+## Peça análise antes de mudança quando a decisão ainda não está clara
+
+A skill também pode ser usada apenas para diagnóstico:
+
+```text
+Use a skill better-effect e faça uma análise desta feature sem alterar código.
+
+Quero saber onde Result, Effect, Future e EffectCommand estão sendo usados no
+boundary errado, onde o lifecycle está inconsistente e quais melhorias realmente
+trariam ganho de DX. Separe problemas confirmados de melhorias opcionais.
+```
+
+Depois, use o diagnóstico como base para uma implementação separada.
+
+## Combine com o analyzer
+
+A skill orienta decisões de código, mas não substitui o tooling estático. Em
+projetos que usam `better_effect_analyzer`, mantenha o analyzer e o graph checker
+como gates independentes.
+
+Depois de uma refatoração relevante, o agente deve executar os comandos do
+projeto e, quando configurado, também o checker do grafo:
+
+```bash
+dart run better_effect_analyzer
+```
+
+Consulte [Diagnósticos e CI](/docs/guides/diagnostics) para configurar essa
+validação.
+
+## Próximos passos
+
+Veja [Prompts](/docs/ai/prompts) para exemplos completos de implementação,
+refatoração, review, debugging, Flutter, concorrência e testes.

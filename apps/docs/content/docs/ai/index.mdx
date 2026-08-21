@@ -1,0 +1,69 @@
+---
+title: IA
+description: Use coding agents com o modelo mental e as convenções oficiais de better_effect
+---
+
+Coding agents conseguem acelerar bastante implementação e refatoração, mas
+`better_effect` possui algumas semânticas que não devem ser reduzidas a padrões
+genéricos de `Future`, `Result` ou state management: failure esperada é diferente
+de defect, interruption não significa cancelamento físico de qualquer Future,
+resources possuem owner, e `EffectCommand` representa mais que um boolean de
+loading.
+
+Por isso este repositório publica a skill oficial **`better-effect`**. Ela fornece
+a agentes compatíveis com o formato aberto Agent Skills o modelo mental, os
+boundaries, as APIs e os critérios de validação usados pelo projeto.
+
+<Cards>
+  <Card title="Usando a skill" href="/docs/ai/using-the-skill" description="Instale com npx skills, escolha o escopo e entenda como orientar o agente." />
+  <Card title="Prompts" href="/docs/ai/prompts" description="Prompts prontos para implementação, refatoração, review, debugging, Flutter e testes." />
+</Cards>
+
+## O que a skill conhece
+
+No core:
+
+- `ResultDart` e typed failures;
+- `Effect` e composição;
+- `use<T>()` e resolução contextual;
+- `Module`, `Runtime`, `Scope` e resources;
+- retry, timeout, interruption e cancellation cooperativa;
+- `Effect.all`, `Effect.forEach` e concorrência limitada;
+- Modules por execução;
+- observabilidade e testes determinísticos;
+- `better_effect_analyzer` como gate complementar.
+
+No Flutter:
+
+- `runBetterEffectApp`, `BetterEffectBootstrap` e providers;
+- ownership do Runtime na árvore;
+- `EffectViewModel`, `EffectCommands` e `EffectCommand`;
+- estado `idle/running/success/failure/defect/interrupted`;
+- `CommandPolicy` com `drop`, `latest`, `queue`, debounce, throttle e overflow;
+- `EffectCommandBuilder`, `Listener`, `Consumer` e `Selector`;
+- one-shot UI effects sem flags manuais;
+- testing utilities do `better_effect_flutter`.
+
+## O que ela não faz
+
+A skill não força uma arquitetura única. Ela não transforma
+`better_effect_flutter` em substituto obrigatório de Provider, Riverpod, BLoC,
+Signals, MobX ou outro state manager. Também não tenta usar todas as APIs da
+biblioteca em toda feature.
+
+A regra é a mesma do projeto: **use a abstração mais simples que preserve a
+semântica necessária**.
+
+## Fonte de verdade
+
+A skill acompanha o monorepo, mas um agente deve primeiro respeitar a versão que
+o seu projeto realmente instalou. A ordem de confiança é:
+
+1. `pubspec.yaml`, lockfile e path/git dependencies do projeto;
+2. source da versão instalada;
+3. testes dessa versão;
+4. documentação da mesma versão;
+5. baseline embutida na skill.
+
+Assim, uma atualização da skill não faz o agente sugerir silenciosamente uma API
+de `main` para um app ainda preso a uma versão anterior.

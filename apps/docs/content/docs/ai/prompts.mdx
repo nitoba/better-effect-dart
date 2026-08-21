@@ -1,0 +1,399 @@
+---
+title: Prompts
+description: Exemplos de prompts para implementar, revisar, depurar e refatorar código com a skill better-effect
+---
+
+Os prompts abaixo são pontos de partida. Substitua nomes de features, constraints
+e critérios de validação pelo contexto real do projeto.
+
+A frase `Use a skill better-effect` torna a intenção explícita em agentes que
+aceitam referência direta à skill. Em agentes que carregam skills
+automaticamente por descrição, o restante do pedido também foi escrito para
+acionar o mesmo contexto.
+
+## Refatorar um projeto Dart existente
+
+```text
+Use a skill better-effect.
+
+Faça uma refatoração profunda deste projeto Dart, que já usa result_dart e
+better_effect, mas ainda trata as bibliotecas de forma superficial.
+
+Antes de editar, leia pubspec.yaml, lockfile, estrutura da aplicação,
+composition root, Modules, Runtime e testes. Mapeie todas as ocorrências de:
+- Result aberto manualmente com isSuccess/getOrNull;
+- Effect usado apenas como wrapper de Future;
+- try/catch repetido;
+- failures genéricas;
+- dependency plumbing desnecessário;
+- Runtime/resource com lifecycle incorreto;
+- retry ou concorrência implementados manualmente.
+
+Refatore todas as ocorrências relevantes, preservando comportamento e contratos
+públicos. Use Dart moderno somente quando melhorar clareza/type safety. Não crie
+arquitetura nova nem abstrações sem necessidade.
+
+Ao final rode format, analyze e tests e entregue um relatório das decisões.
+```
+
+## Refatorar uma feature Flutter
+
+```text
+Use a skill better-effect.
+
+Refatore completamente a feature <nome> deste app Flutter para usar
+better_effect_flutter de forma idiomática.
+
+Analise o fluxo inteiro da feature, da View até repository/service. Quero que:
+- operações assíncronas relevantes sejam Effects tipados;
+- o ViewModel possua EffectCommands, não infraestrutura;
+- a View renderize EffectCommandState;
+- navegação, SnackBars e dialogs sejam one-shot listeners;
+- a policy de cada Command represente a intenção real do usuário;
+- o Runtime tenha um único owner;
+- resources e dispose tenham lifecycle correto.
+
+Não imponha ViewModel por tela se a responsabilidade atual não justificar isso e
+não substitua o state manager existente apenas para usar better_effect_flutter.
+
+Mapeie todas as ocorrências antes de alterar e conclua a refatoração inteira.
+Rode flutter analyze e os testes afetados.
+```
+
+## Implementar uma feature nova
+
+```text
+Use a skill better-effect.
+
+Implemente a feature <nome> neste projeto.
+
+Primeiro entenda a arquitetura e as versões instaladas de better_effect,
+better_effect_flutter e result_dart. Modele as failures esperadas, defina o
+Effect da operação, resolva dependências pelo boundary apropriado e integre ao
+Module/Runtime já existente.
+
+Se for Flutter, exponha a operação por EffectCommand e escolha explicitamente a
+CommandPolicy com base na interação da UI. Não crie loading/error booleans em
+paralelo ao estado do Command.
+
+Preserve os padrões existentes que estiverem corretos. Adicione testes para
+success, typed failure e os outros outcomes que forem semanticamente relevantes.
+Valide analyze/test antes de concluir.
+```
+
+## Revisar uma implementação antes de merge
+
+```text
+Use a skill better-effect e faça code review desta mudança.
+
+Compare o código com as versões efetivamente instaladas e com a documentação e
+testes correspondentes do better_effect-dart.
+
+Revise especialmente:
+- typed failures vs defects;
+- Effect/Result/Future boundaries;
+- DI e Module bindings;
+- Runtime/Scope/resource ownership;
+- timeout/interruption/cancellation;
+- retry e concorrência;
+- no Flutter, Command state, policy, listeners, selectors e dispose.
+
+Separe a resposta em:
+1. bugs ou gaps confirmados;
+2. riscos que dependem de teste/CI;
+3. melhorias opcionais de DX/legibilidade.
+
+Não trate preferência estética como bug.
+```
+
+## Diagnosticar bug sem mudar código ainda
+
+```text
+Use a skill better-effect. Não altere código nesta etapa.
+
+Investigue este bug: <descrição do comportamento>.
+
+Siga a execução da entrada até o Runtime e o Exit. Determine primeiro se o caso
+é typed failure, defect, interruption ou problema de lifecycle.
+
+No Flutter, siga também EffectCommand -> policy -> state -> listener/builder e
+verifique se uma execução antiga ainda pode atualizar a UI.
+
+Mostre a causa raiz provável com evidências do código, os arquivos envolvidos e
+a correção recomendada. Separe causa confirmada de hipóteses que ainda precisam
+de teste.
+```
+
+## Escolher a policy correta para busca
+
+```text
+Use a skill better-effect.
+
+Revise a busca desta tela. Hoje requisições antigas conseguem terminar depois da
+mais nova e sobrescrever o resultado visível.
+
+Refatore o fluxo usando a policy apropriada de EffectCommand. Avalie também se
+faz sentido debounce e cancelPrevious, lembrando que interruption lógica não
+significa cancelamento físico de qualquer Future Dart.
+
+Não adicione Timer manual, flags de requestId ou estado duplicado se a própria
+CommandPolicy já resolve o problema. Adicione testes determinísticos para a
+ordem das chamadas e para garantir que apenas o resultado autoritativo altera a
+UI.
+```
+
+## Submit que não pode duplicar
+
+```text
+Use a skill better-effect.
+
+O formulário <nome> pode disparar duas submissões com taps rápidos. Refatore o
+Command para que uma segunda chamada durante a execução tenha a semântica
+correta para uma ação única.
+
+Não resolva isso com bool manual no widget. Preserve o feedback visual de
+loading, trate failure esperada separadamente de defect e mantenha navegação de
+sucesso como efeito one-shot.
+
+Adicione teste cobrindo duas chamadas concorrentes.
+```
+
+## Writes que precisam manter ordem
+
+```text
+Use a skill better-effect.
+
+Esta feature envia mudanças de edição para persistência e hoje algumas intenções
+se perdem ou chegam fora de ordem.
+
+Modele o fluxo com EffectCommand e escolha uma política que preserve cada write
+na ordem. Avalie limite de fila e estratégia de overflow com base no produto.
+Não converta overflow/rejeição operacional em failure de domínio falsa.
+
+Adicione testes para ordem, pending/queued count e dispose/cancelamento.
+```
+
+## Migrar `FutureBuilder` e estado manual
+
+```text
+Use a skill better-effect.
+
+Esta tela já chama uma operação baseada em Effect, mas ainda usa FutureBuilder,
+isLoading, error e flags para Snackbar.
+
+Refatore apenas a camada de apresentação para better_effect_flutter:
+- crie/ajuste o EffectCommand no ViewModel;
+- use o estado tipado do Command para renderização;
+- use Listener para ações one-shot;
+- preserve dados anteriores somente se isso fizer sentido para a UX;
+- use Selector apenas onde reduzir rebuild de um subtree relevante.
+
+Não mova regra de negócio para o ViewModel e não altere repositories sem
+necessidade.
+```
+
+## Revisar resources e lifecycle
+
+```text
+Use a skill better-effect.
+
+Faça uma auditoria de lifecycle neste projeto.
+
+Mapeie HTTP clients, database connections, subscriptions, transactions, arquivos
+temporários e outros resources. Para cada um informe:
+- quem cria;
+- quem usa;
+- quem deveria possuir;
+- quando deve fechar;
+- API de better_effect mais adequada: Module.resource, Module por execução,
+  use.acquire ou outro boundary já disponível na versão instalada.
+
+Depois implemente as correções necessárias, evitando double-close e mantendo o
+Runtime owner de trabalho físico que ainda não terminou após timeout ou
+interruption lógica.
+```
+
+## Implementar retry corretamente
+
+```text
+Use a skill better-effect.
+
+Substitua o retry manual desta operação por Effect.retry/RetryPolicy conforme a
+versão instalada.
+
+Defina explicitamente quais typed failures são transitórias. Defects não devem
+ser repetidos. Se houver delay/jitter, configure EffectClock/EffectRandom no
+Module correto e escreva testes com clock determinístico, sem sleeps reais.
+
+Garanta também que resources adquiridos por tentativa sejam fechados antes da
+próxima tentativa.
+```
+
+## Refatorar fan-out de requisições
+
+```text
+Use a skill better-effect.
+
+Esta operação executa uma lista de chamadas externas com Future.wait sem limite.
+Refatore para a composição de coleções do better_effect adequada à versão
+instalada.
+
+Escolha um limite de concorrência justificável pelo serviço/host, preserve a
+ordem de saída quando necessária e mantenha ownership dos workers já iniciados
+em caso de failure, defect ou interruption.
+
+Adicione testes de limite de concorrência e resultado ordenado.
+```
+
+## Usar Module por execução
+
+```text
+Use a skill better-effect.
+
+Esta operação precisa compartilhar <transaction/request context/tenant> entre
+várias camadas, mas esse valor não deve viver no Runtime raiz.
+
+Avalie se um execution-scoped Module é o boundary correto. Se for, implemente com
+runWith/runExitWith/executeWith conforme a API instalada, deixando claro o
+fallback para serviços do Runtime raiz e o cleanup do ambiente temporário.
+
+Não mova parâmetros normais de domínio para o ambiente apenas para reduzir
+assinaturas.
+```
+
+## Melhorar observabilidade
+
+```text
+Use a skill better-effect.
+
+Quero instrumentar as operações <lista> sem misturar logger/tracer com regra de
+negócio.
+
+Use RuntimeObserver, execution labels e metadata segura quando forem suportados
+pela versão instalada. Proponha labels estáveis orientadas a operação, não a
+classes, e não inclua IDs variáveis nas labels.
+
+Garanta que falha do observer não altere o outcome do Effect e evite I/O lento
+sincronamente dentro dos callbacks de observabilidade.
+```
+
+## Testar um Effect com fakes
+
+```text
+Use a skill better-effect.
+
+Escreva testes determinísticos para <Effect> usando o toolkit oficial de testes.
+Substitua somente as bordas de I/O via Module.overrideWith ou mecanismo
+correspondente da versão instalada.
+
+Cubra success, typed failure e defect quando relevantes. Use TestGate/TestSignal
+para coordenação concorrente e assertNoActiveExecutions para detectar trabalho
+físico esquecido. Não use sleeps arbitrários.
+```
+
+## Testar um `EffectCommand`
+
+```text
+Use a skill better-effect.
+
+Crie testes para o Command <nome> sem montar widgets quando isso for suficiente.
+Quero validar a sequência de estados, o Exit retornado ao caller e a policy de
+concorrência.
+
+Use EffectCommandProbe e EffectCommandPolicyProbe quando disponíveis. Se houver
+debounce/throttle, use ManualEffectClock. Teste também callers interrompidos ou
+rejeitados e garanta dispose correto.
+```
+
+## Testar navegação/Snackbar one-shot
+
+```text
+Use a skill better-effect.
+
+Adicione um widget test que prove que <navegação/Snackbar/dialog> acontece uma
+única vez por revisão terminal do Command e não repete após rebuilds não
+relacionados.
+
+Use BetterEffectTestApp/BetterEffectProvider.value e
+EffectCommandListenerProbe quando disponíveis. O teste deve ser owner do Runtime
+e fechá-lo no teardown correto.
+```
+
+## Modernizar Dart sem syntax golf
+
+```text
+Use a skill better-effect.
+
+Revise esta feature também sob a ótica de Dart moderno. Quero melhorar type
+safety e legibilidade com sealed/final/abstract interface classes, records,
+patterns, exhaustive switch, constructor tear-offs, dot shorthand e extension
+types apenas quando houver ganho real.
+
+Não encurte código por esporte, não crie wrappers desnecessários e preserve a
+clareza do fluxo Effect/Result.
+```
+
+## Auditoria arquitetural de uma feature Flutter
+
+```text
+Use a skill better-effect. Faça primeiro um diagnóstico, sem editar.
+
+Analise a feature <nome> de ponta a ponta: View, ViewModel, Commands, use cases,
+repositories, services, API/database e Module.
+
+Quero saber:
+- onde a UI conhece infraestrutura demais;
+- onde Effects deveriam continuar pela camada de application/data;
+- onde dependencies estão sendo transportadas manualmente sem necessidade;
+- onde failure tipada se perde;
+- onde Command state está duplicado;
+- se o Runtime/Scope/resource ownership está correto;
+- se a divisão dos arquivos representa a feature ou concentra responsabilidades.
+
+Priorize problemas concretos e indique a sequência de refatoração com menor
+risco.
+```
+
+## Atualizar código depois de uma nova versão da biblioteca
+
+```text
+Use a skill better-effect.
+
+O projeto foi atualizado de better_effect/better_effect_flutter <versão antiga>
+para <versão nova>.
+
+Leia changelog, source e documentação correspondentes à nova versão e compare
+com o uso atual do app. Mapeie APIs deprecated, novas abstrações que substituem
+boilerplate local e mudanças semânticas de lifecycle/Command/Runtime.
+
+Depois implemente a migração completa e rode analyzer/testes. Não use apenas o
+conhecimento embutido da skill: a versão instalada e seu source são a fonte de
+verdade.
+```
+
+## Dica: prompts menores também funcionam
+
+Depois que a skill está instalada, não é necessário repetir todo o modelo mental
+em toda interação. Pedidos curtos podem ser suficientes quando o contexto já
+está no repositório:
+
+```text
+Use a skill better-effect e revise este Effect. Ele está achatando failure e
+defect no mesmo catch.
+```
+
+```text
+Use a skill better-effect e escolha a CommandPolicy correta para esta busca.
+```
+
+```text
+Use a skill better-effect e verifique quem deveria ser owner deste Runtime.
+```
+
+```text
+Use a skill better-effect e transforme este teste com delays reais em um teste
+determinístico.
+```
+
+A skill fornece as regras da biblioteca; o prompt fornece a intenção específica
+da tarefa.

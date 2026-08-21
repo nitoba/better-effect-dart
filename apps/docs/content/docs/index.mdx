@@ -71,12 +71,13 @@ para a composição completa. Um programa pode estar correto arquivo a arquivo e
 ainda assim faltar um binding no Module raiz — são problemas diferentes, por
 isso existem verificações diferentes.
 
-O projeto é dividido em três camadas:
+O projeto é dividido em três camadas e uma integração oficial para agentes de IA:
 
 <Cards>
   <Card title="better_effect" href="/docs/packages/better_effect" description="Runtime Dart com Effect, Module, escopos, recursos e observabilidade." />
   <Card title="better_effect_flutter" href="/docs/packages/better_effect_flutter" description="Integração Flutter para Commands, ViewModels e UI reativa." />
   <Card title="better_effect_analyzer" href="/docs/packages/better_effect_analyzer" description="Plugin e CLI para encontrar problemas no código e no grafo de Modules." />
+  <Card title="IA e Agent Skill" href="/docs/ai" description="Instale a skill oficial e dê aos agentes o modelo mental e as regras do projeto." />
 </Cards>
 
 ## O caminho recomendado
@@ -96,6 +97,9 @@ O projeto é dividido em três camadas:
    [`better_effect_flutter`](/docs/packages/better_effect_flutter).
 7. Ative os diagnósticos do
    [`better_effect_analyzer`](/docs/packages/better_effect_analyzer).
+8. Se você usa um coding agent, instale a
+   [Agent Skill oficial](/docs/ai/using-the-skill) para manter sugestões e
+   refatorações alinhadas à API e às semânticas do projeto.
 
 Os packages são publicados de forma independente no pub.dev. Consulte o
 [guia de releases](/docs/maintainers/releases) quando for publicar uma nova
