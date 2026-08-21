@@ -27,7 +27,7 @@ export default function HomePage() {
         <div className="be-hero-content">
           <div className="be-hero-copy">
             <div className="be-hero-meta">
-              <Image src="/logo.svg" alt="" width={40} height={40} priority />
+              <Image src="/logo.png" alt="" width={40} height={40} priority style={{ filter: 'none' }} />
               <span>better_effect</span>
               <span className="be-meta-divider" aria-hidden="true" />
               <span>Dart + Flutter</span>
@@ -145,7 +145,7 @@ export default function HomePage() {
       </section>
 
       <footer className="be-home-footer">
-        <div className="be-footer-brand"><Image src="/logo.svg" alt="" width={28} height={28} /> <span>better_effect</span></div>
+        <div className="be-footer-brand"><Image src="/logo.png" alt="" width={28} height={28} style={{ filter: 'none' }} /> <span>better_effect</span></div>
         <span>Arquitetura tipada para Dart e Flutter.</span>
         <Link href="/docs">Documentação <ArrowUpRight aria-hidden="true" /></Link>
       </footer>

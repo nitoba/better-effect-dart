@@ -14,18 +14,39 @@ export default async function OpenGraphImage() {
   return new ImageResponse(
     <div
       style={{
-        width: '100%', height: '100%', display: 'flex', flexDirection: 'column',
-        justifyContent: 'space-between', padding: '72px 78px', color: '#f4f4f1',
-        background: '#050505', border: '1px solid #333', fontFamily: 'sans-serif',
+        width: '100%',
+        height: '100%',
+        display: 'flex',
+        flexDirection: 'column',
+        justifyContent: 'space-between',
+        padding: '70px 78px',
+        color: '#f4f4f1',
+        background: '#050505',
+        border: '1px solid #242424',
+        fontFamily: 'sans-serif',
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 22 }}>
-        <div style={{ width: 96, height: 96, border: '1px solid #555', borderRadius: 22, background: '#111', backgroundImage: `url(${logoData})`, backgroundPosition: 'center', backgroundRepeat: 'no-repeat', backgroundSize: 'cover' }} />
-        <div style={{ fontSize: 52, fontWeight: 600, letterSpacing: '-0.04em' }}>{appName}</div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 24 }}>
+        <div
+          style={{
+            width: 112,
+            height: 112,
+            backgroundImage: `url(${logoData})`,
+            backgroundPosition: 'center',
+            backgroundRepeat: 'no-repeat',
+            backgroundSize: 'contain',
+          }}
+        />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ fontSize: 52, fontWeight: 600, letterSpacing: '-0.04em' }}>{appName}</div>
+          <div style={{ fontSize: 20, color: '#969693' }}>Dart + Flutter</div>
+        </div>
       </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 16, maxWidth: 980 }}>
-        <div style={{ fontSize: 40, lineHeight: 1.15 }}>Effects, Services, Lifetimes.</div>
-        <div style={{ fontSize: 24, lineHeight: 1.35, color: '#999' }}>{appDescription}</div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 18, maxWidth: 980 }}>
+        <div style={{ fontSize: 42, lineHeight: 1.12, color: '#f4f4f1' }}>
+          Effects, Services, Lifetimes.
+        </div>
+        <div style={{ fontSize: 24, lineHeight: 1.35, color: '#969693' }}>{appDescription}</div>
       </div>
     </div>,
     size,
