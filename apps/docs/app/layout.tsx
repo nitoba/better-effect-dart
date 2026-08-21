@@ -8,10 +8,12 @@ const inter = Inter({
   subsets: ['latin'],
 });
 
+const defaultTitle = `${appName} — arquitetura tipada para Dart e Flutter`;
+
 export const metadata: Metadata = {
   metadataBase: siteUrl,
   title: {
-    default: `${appName} — typed application architecture`,
+    default: defaultTitle,
     template: `%s | ${appName}`,
   },
   description: appDescription,
@@ -27,15 +29,42 @@ export const metadata: Metadata = {
     url: '/',
     siteName: appName,
     locale: 'pt_BR',
-    title: `${appName} — typed application architecture`,
+    title: defaultTitle,
     description: appDescription,
-    images: [{ url: socialImagePath, width: 1200, height: 630, alt: appName }],
+    images: [
+      {
+        url: socialImagePath,
+        width: 1200,
+        height: 630,
+        alt: defaultTitle,
+      },
+    ],
   },
   twitter: {
     card: 'summary_large_image',
-    title: `${appName} — typed application architecture`,
+    title: defaultTitle,
     description: appDescription,
     images: [socialImagePath],
+  },
+  icons: {
+    icon: [
+      { url: '/favicon.ico', type: 'image/png', sizes: '192x192' },
+      { url: '/icon.png', type: 'image/png', sizes: '192x192' },
+    ],
+    shortcut: [{ url: '/favicon.ico', type: 'image/png' }],
+    apple: [{ url: '/apple-icon.png', type: 'image/png', sizes: '180x180' }],
+  },
+  manifest: '/manifest.webmanifest',
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: {
+      index: true,
+      follow: true,
+      'max-image-preview': 'large',
+      'max-snippet': -1,
+      'max-video-preview': -1,
+    },
   },
 };
 
