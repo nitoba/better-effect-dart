@@ -10,6 +10,15 @@ import 'package:flutter_test/flutter_test.dart';
 It re-exports every core test helper and adds Command probes, typed state
 assertions, one-shot listener verification, and a minimal widget boundary.
 
+## Normative lifecycle contract
+
+This guide explains testing techniques; it does not redefine Command authority
+or Runtime ownership. The versioned compatibility contract is
+[`SEMANTICS.md`](../../../SEMANTICS.md), and its Flutter rule IDs are executed by
+the independent `packages/better_effect_conformance` suite together with the
+core lifecycle rules. Semantic changes also require the affected changelog and
+[`docs/semantic-migrations.md`](../../../docs/semantic-migrations.md).
+
 ## Observe visible Command states
 
 `EffectCommandProbe` listens to the same `ValueListenable` used by the UI:
@@ -195,7 +204,6 @@ The policy probe records started, queued, replaced, rejected,
 dropped, trigger, cancellation, and defect decisions. No input or
 Effect value is included in an event. Release every gate, pending
 clock window, and physical execution before closing the Runtime.
-
 
 ## Test selector rebuild boundaries
 

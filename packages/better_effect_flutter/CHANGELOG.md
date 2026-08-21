@@ -1,5 +1,10 @@
 ## Unreleased
 
+- Added the repository-level normative semantic contract and an independent
+  cross-package conformance suite for Command authority, one-shot delivery, and
+  Flutter Runtime ownership alongside the core lifecycle rules.
+- Semantic compatibility changes now require the matching conformance scenario,
+  affected package changelog entries, and a semantic migration ledger entry.
 - Added `BetterEffectFeatureScope` for feature-owned child Runtimes with
   loading/error/retry startup, nested feature environments, and generation-safe
   restart behavior.

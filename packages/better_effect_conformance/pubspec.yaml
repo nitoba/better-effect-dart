@@ -1,0 +1,24 @@
+name: better_effect_conformance
+description: Internal executable semantic contract for the better_effect package family.
+publish_to: none
+
+environment:
+  sdk: ">=3.10.0 <4.0.0"
+  flutter: ">=3.38.0"
+
+dependencies:
+  better_effect:
+    path: ../better_effect
+  better_effect_flutter:
+    path: ../better_effect_flutter
+  flutter:
+    sdk: flutter
+
+dependency_overrides:
+  better_effect:
+    path: ../better_effect
+
+dev_dependencies:
+  flutter_lints: ^6.0.0
+  flutter_test:
+    sdk: flutter

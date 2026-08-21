@@ -12,6 +12,15 @@ coordination primitives, Runtime event recording, Exit assertions, and the
 `ResolverBackend` compatibility contract. Production code continues to import
 `package:better_effect/better_effect.dart`.
 
+## Normative lifecycle contract
+
+This guide explains testing techniques; it does not redefine lifecycle or
+outcome semantics. The versioned compatibility contract is
+[`SEMANTICS.md`](../../../SEMANTICS.md), and its rule IDs are executed by the
+independent `packages/better_effect_conformance` suite. A semantic rule change
+must also update the affected changelog and
+[`docs/semantic-migrations.md`](../../../docs/semantic-migrations.md).
+
 ## A test-owned Runtime
 
 `TestRuntime` starts a real Runtime and attaches a

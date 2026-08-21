@@ -71,12 +71,13 @@ para a composição completa. Um programa pode estar correto arquivo a arquivo e
 ainda assim faltar um binding no Module raiz — são problemas diferentes, por
 isso existem verificações diferentes.
 
-O projeto é dividido em três camadas e uma integração oficial para agentes de IA:
+O projeto é dividido em três camadas, um contrato semântico executável e uma integração oficial para agentes de IA:
 
 <Cards>
   <Card title="better_effect" href="/docs/packages/better_effect" description="Runtime Dart com Effect, Module, escopos, recursos e observabilidade." />
   <Card title="better_effect_flutter" href="/docs/packages/better_effect_flutter" description="Integração Flutter para Commands, ViewModels e UI reativa." />
   <Card title="better_effect_analyzer" href="/docs/packages/better_effect_analyzer" description="Plugin e CLI para encontrar problemas no código e no grafo de Modules." />
+  <Card title="Contrato semântico" href="/docs/semantics" description="MUST/MUST NOT versionados e uma suíte independente de conformance para lifecycle e outcomes." />
   <Card title="IA e Agent Skill" href="/docs/ai" description="Instale a skill oficial e dê aos agentes o modelo mental e as regras do projeto." />
 </Cards>
 
@@ -91,13 +92,15 @@ O projeto é dividido em três camadas e uma integração oficial para agentes d
    [recursos e ciclo de vida](/docs/guides/resources-and-lifetimes).
 4. Para request context, transactions ou overrides temporários, use
    [Modules por execução](/docs/guides/execution-scoped-modules).
-5. Conecte logs, métricas e tracing pelo guia de
+5. Consulte o [contrato semântico normativo](/docs/semantics) quando uma decisão
+   depender de precedence de outcomes, cleanup, interruption ou ownership.
+6. Conecte logs, métricas e tracing pelo guia de
    [observabilidade](/docs/guides/observability).
-6. Em Flutter, siga o guia de
+7. Em Flutter, siga o guia de
    [`better_effect_flutter`](/docs/packages/better_effect_flutter).
-7. Ative os diagnósticos do
+8. Ative os diagnósticos do
    [`better_effect_analyzer`](/docs/packages/better_effect_analyzer).
-8. Se você usa um coding agent, instale a
+9. Se você usa um coding agent, instale a
    [Agent Skill oficial](/docs/ai/using-the-skill) para manter sugestões e
    refatorações alinhadas à API e às semânticas do projeto.
 
