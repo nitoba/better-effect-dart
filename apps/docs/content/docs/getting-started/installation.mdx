@@ -1,61 +1,156 @@
 ---
 title: Instalação
-description: Adicione os packages ao seu projeto Dart ou Flutter
+description: Escolha o package certo, confira os requisitos e valide a instalação
 ---
 
+A família tem três packages com responsabilidades diferentes. Instale somente o que a camada realmente usa.
+
+| Package | Use quando | Tipo de dependência |
+| --- | --- | --- |
+| `better_effect` | código Dart precisa de Effect, Module, Runtime, Scope e recursos | `dependencies` |
+| `better_effect_flutter` | uma app Flutter precisa de Commands, lifecycle e widgets | `dependencies` |
+| `better_effect_analyzer` | o projeto quer diagnósticos e validação do grafo | `dev_dependencies` / plugin |
+
+A linha desta documentação é `0.4.x`.
+
+## Requisitos da linha 0.4.x
+
+`better_effect` e `better_effect_analyzer` exigem Dart `>=3.10.0 <4.0.0`.
+
+`better_effect_flutter` exige:
+
+```text
+Dart    >=3.10.0 <4.0.0
+Flutter >=3.38.0
+```
+
+O package Flutter depende de `better_effect ^0.4.0` e reexporta a API pública do core.
+
 ## Dart
+
+Para CLI, backend Dart, package de domínio ou outra camada sem Flutter:
 
 ```bash
 dart pub add better_effect
 ```
 
-O package base é Dart-only e não depende de Flutter. Escolha-o quando a lógica
-fica em um package compartilhado, backend, CLI ou domínio que precisa ser
-testado sem bindings de UI.
+Equivalente no `pubspec.yaml`:
+
+```yaml
+dependencies:
+  better_effect: ^0.4.0
+```
+
+Importe:
+
+```dart
+import 'package:better_effect/better_effect.dart';
+```
+
+Valide a resolução:
+
+```bash
+dart pub get
+dart analyze
+```
 
 ## Flutter
+
+Para uma aplicação Flutter:
 
 ```bash
 flutter pub add better_effect_flutter
 ```
 
-`better_effect_flutter` já depende do core e reexporta sua API pública. Em uma
-app Flutter, esta é a instalação recomendada; adicione o core diretamente
-apenas quando um package Dart separado também o utilizar.
+Ou:
 
-O package Flutter reexporta a API pública de `better_effect`. Em aplicações
-Flutter, normalmente basta importar:
+```yaml
+dependencies:
+  better_effect_flutter: ^0.4.0
+```
+
+Na maioria dos arquivos, um único import é suficiente:
 
 ```dart
 import 'package:better_effect_flutter/better_effect_flutter.dart';
 ```
 
+Não é necessário adicionar `better_effect` novamente somente para acessar `Effect`, `Module` ou `Runtime`: o package Flutter já depende do core e reexporta sua API.
+
+Valide:
+
+```bash
+flutter pub get
+flutter analyze
+```
+
 ## Analyzer
 
-Adicione o analyzer como dependência de desenvolvimento:
+O analyzer é tooling. Não o coloque em `dependencies` de produção.
+
+Quando a aplicação também usa a CLI ou a API de grafo:
 
 ```bash
 dart pub add --dev better_effect_analyzer
 ```
 
-O analyzer é ferramenta de desenvolvimento: não entra no bundle, não é
-resolvido pelo Runtime e não deve aparecer em `dependencies` de produção.
+```yaml
+dev_dependencies:
+  better_effect_analyzer: ^0.4.0
+```
 
-Depois ative o plugin no `analysis_options.yaml`:
+O plugin do Analysis Server é configurado no `analysis_options.yaml` **raiz**:
 
 ```yaml
 plugins:
   better_effect_analyzer:
+    version: ^0.4.0
+```
+
+As regras de correção são ativadas com o plugin. As regras de arquitetura e migração são opt-in:
+
+```yaml
+plugins:
+  better_effect_analyzer:
+    version: ^0.4.0
     diagnostics:
+      effect_command_not_owned: true
+      closed_runtime_exposed: true
+      module_root_not_complete: true
       repository_requests_repository: true
       viewmodel_requests_service: true
       widget_requests_business_dependency: true
       singleton_viewmodel: true
 ```
 
-Depois de editar `analysis_options.yaml`, reinicie o Analysis Server da IDE.
-Use `version` para um package publicado e `path` absoluto apenas enquanto
-desenvolve o analyzer dentro deste monorepo.
+Depois de alterar a seção `plugins`, reinicie o Dart Analysis Server da IDE.
 
-Consulte o guia de [diagnósticos](../guides/diagnostics) para escolher as
-regras adequadas ao projeto.
+## Desenvolvimento local do monorepo
+
+Packages publicados devem usar `version`. O plugin aceita `path` durante desenvolvimento local, mas o caminho precisa ser absoluto:
+
+```yaml
+plugins:
+  better_effect_analyzer:
+    path: /caminho/absoluto/para/better-effect-dart/packages/better_effect_analyzer
+```
+
+O monorepo usa `pubspec_overrides.yaml` ignorado pelo Git para apontar dependências hosted para packages irmãos durante validações locais. Esse override não faz parte do archive publicado.
+
+## Erros comuns de instalação
+
+### O plugin não aparece
+
+Confirme três pontos: a configuração está no `analysis_options.yaml` raiz, `version`/`path` resolve corretamente e o Analysis Server foi reiniciado.
+
+### Há conflito de `analyzer` no Flutter
+
+`better_effect_analyzer 0.4.x` usa `analysis_server_plugin >=0.3.14 <0.3.18` e `analyzer ^12.1.0`. O Flutter fixa versões de tooling no SDK; confira o SDK instalado antes de alterar constraints do plugin.
+
+### A documentação mostra uma API que não existe no projeto
+
+A documentação acompanha a linha atual. Confirme `pubspec.lock` e a versão efetivamente resolvida. Para código existente em uma linha anterior, consulte o `CHANGELOG.md` correspondente antes de copiar uma API nova.
+
+## Próximo passo
+
+Se a instalação passou, leia o [modelo mental](./mental-model) e execute a [primeira feature](./first-feature). Para configuração do analyzer e CI, use o guia de [diagnósticos](../guides/diagnostics).
