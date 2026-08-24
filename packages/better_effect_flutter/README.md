@@ -3,9 +3,33 @@
 [![pub package](https://img.shields.io/pub/v/better_effect_flutter.svg)](https://pub.dev/packages/better_effect_flutter)
 [![Flutter](https://img.shields.io/badge/Flutter-%E2%89%A53.38.0-02569B.svg)](https://flutter.dev/)
 
-`better_effect_flutter` conecta o runtime Dart de `better_effect` ao ciclo de vida e à UI do Flutter. Um `Effect<A, E>` passa a ser executado por um `EffectCommand` e projetado em um estado selado que distingue loading, sucesso, falha esperada, defect e interrupção.
+`better_effect_flutter` conecta o runtime Dart de `better_effect` ao ciclo de vida e à UI do Flutter. Um `Effect<A, E>` continua sendo o mesmo programa do core; a camada Flutter executa esse Effect por meio de um `EffectCommand` e projeta seu outcome em um estado selado que distingue loading, sucesso, falha esperada, defect e interrupção.
 
-O package não substitui Provider, Riverpod, BLoC, Signals, MobX ou outra solução de state management. Ele fornece uma fronteira de execução e lifecycle que pode ser usada por essas ferramentas.
+O package **depende de `better_effect` e reexporta sua API pública**. `Module`, `Runtime`, `Scope`, resources, retry, concorrência, `EffectLocal`, `RuntimeObserver` e testing do core continuam disponíveis em uma aplicação Flutter. Não existe um segundo runtime para Flutter.
+
+O package também não substitui Provider, Riverpod, BLoC, Signals, MobX ou outra solução de state management. Ele fornece uma fronteira de execução e lifecycle que pode ser usada por essas ferramentas.
+
+## Como Dart e Flutter se encaixam
+
+```text
+better_effect
+Module → Runtime → Effect<A, E> → Exit<A, E>
+                    │
+                    │ executado pela camada Flutter
+                    ▼
+better_effect_flutter
+BetterEffectScope
+      ↓
+EffectCommands
+      ↓
+EffectCommand
+      ↓
+EffectCommandState
+      ↓
+Builder / Listener / Consumer / Selector
+```
+
+Repositories, services e use cases continuam retornando `Effect<A, E>`. O Command é o adapter que possui uma execução para a UI; ele não substitui o Effect nem muda sua semântica.
 
 ## Quando faz sentido usar
 
@@ -34,7 +58,57 @@ dependencies:
   better_effect_flutter: ^0.4.0
 ```
 
-O package reexporta `better_effect`, portanto a maioria das aplicações precisa de um único import para as APIs da família.
+A maioria das aplicações precisa de um único import:
+
+```dart
+import 'package:better_effect_flutter/better_effect_flutter.dart';
+```
+
+## Mapa completo da integração Flutter
+
+### Runtime e scopes
+
+| API | Quando usar |
+| --- | --- |
+| `runBetterEffectApp` | iniciar a app e possuir o Runtime raiz com o menor boilerplate |
+| `BetterEffectBootstrap` | startup declarativo com loading, erro, retry e `restartKey` |
+| `BetterEffectProvider` | publicar um Runtime existente que o widget/application boundary possui |
+| `BetterEffectProvider.value` | publicar um Runtime cujo owner está fora da árvore |
+| `BetterEffectScope` | `InheritedWidget` que expõe `Runtime` + `EffectCommands` |
+| `BetterEffectFeatureScope` | child Runtime que vive durante uma feature e faz fallback para o pai |
+
+### Commands e ViewModels
+
+| API | Quando usar |
+| --- | --- |
+| `EffectCommands` | factory scoped de Commands ligados ao Runtime |
+| `EffectCommand0<A, E>` | operação sem input |
+| `EffectCommand<I, A, E>` | operação com input tipado |
+| `EffectCommandState<A, E>` | estado selado da execução |
+| `EffectCommandSnapshot<A, E>` | estado + `lastExit`, pending, queue e trigger metadata |
+| `EffectViewModel` | classe base opcional que cria e possui Commands |
+| `EffectCommandOwner` | mixin para outra classe base de ViewModel |
+| `EffectViewModelBuilder` | cria, observa, recria e descarta ViewModel no scope atual |
+
+### Widgets de Command
+
+| Widget | Responsabilidade |
+| --- | --- |
+| `EffectCommandBuilder` | renderizar `EffectCommandState`; suporta `buildWhen` e `child` |
+| `EffectCommandListener` | side effects one-shot; suporta `listenWhen`, callbacks por estado e `fireImmediately` |
+| `EffectCommandConsumer` | combinar Builder + Listener no mesmo boundary |
+| `EffectCommandSelector` | rebuild somente quando uma projeção selecionada muda |
+| `EffectCommandSelector.snapshot` | selecionar `pendingCount`, `queuedCount`, `triggerPendingCount`, `lastExit` ou `policy` |
+
+### Context e observabilidade
+
+`BuildContext` recebe `effectCommands`, `watchEffectCommands()`, `effectRuntime`, `runEffect`, `runEffectExit` e `readEffectService`. Commands podem ser observados globalmente por `EffectCommandObserver`/`EffectCommandTransition` e `EffectCommandPolicyObserver`.
+
+### Testing
+
+`package:better_effect_flutter/testing.dart` adiciona `BetterEffectTestApp` e probes para estado, listener e policy. O helper usa ownership externo e deixa o teste responsável por fechar o Runtime.
+
+A documentação completa de cada item está em [better_effect_flutter](https://better-effect-dart.vercel.app/docs/packages/better_effect_flutter).
 
 ## Primeiro exemplo funcional
 
@@ -137,10 +211,6 @@ Future<void> main() {
 
 Execute com `flutter run`. Antes do toque, a tela está em `EffectCommandIdle`; durante a operação, em `EffectCommandRunning`; ao concluir, renderiza `Olá, Flutter!` a partir de `EffectCommandSuccess`.
 
-`runBetterEffectApp` inicia um Runtime de aplicação e publica `BetterEffectScope` na árvore. Para startup declarativo com loading/error/retry, use `BetterEffectBootstrap`. Quando outro boundary já possui o Runtime, use `BetterEffectProvider.value`.
-
-`EffectViewModel` é opcional. Se a aplicação já possui uma classe base de ViewModel, use o mixin `EffectCommandOwner` para possuir e descartar Commands automaticamente. Adapters de Provider/Riverpod/BLoC podem obter a factory scoped com `context.effectCommands`.
-
 ## O estado de um Command
 
 `EffectCommandState<A, E>` é selado:
@@ -156,13 +226,25 @@ Execute com `flutter run`. Antes do toque, a tela está em `EffectCommandIdle`; 
 
 `execute()` retorna `Future<Exit<A, E>>`, então código imperativo também pode aguardar o mesmo trabalho sem duplicar estado.
 
-## Renderização e efeitos one-shot
+## Builder, Listener, Consumer e Selector
 
-Use `EffectCommandBuilder` quando a UI precisa renderizar o estado do Command. Use `EffectCommandListener` para navegação, diálogo, SnackBar, analytics e outros efeitos de apresentação.
+### `EffectCommandBuilder`
+
+Use quando a UI precisa apenas renderizar estado. `buildWhen` pode filtrar transições; `child` preserva uma subtree estática.
+
+### `EffectCommandListener`
+
+Use para navegação, diálogo, SnackBar, analytics e outros efeitos de apresentação. Ele oferece callbacks `onIdle`, `onRunning`, `onSuccess`, `onFailure`, `onDefect`, `onInterrupted` e `onChanged`, além de `listenWhen` e `fireImmediately`.
 
 O listener consome cada `revision` uma vez e despacha callbacks após o frame. Não é necessário chamar `clearError()` ou manter uma flag manual para impedir que a mesma navegação aconteça novamente.
 
-`EffectCommandSelector` permite observar uma projeção do estado ou do `EffectCommandSnapshot`; `EffectCommandBuilder.buildWhen` é útil quando a View ainda precisa do estado completo, mas quer filtrar rebuilds.
+### `EffectCommandConsumer`
+
+Combina Listener e Builder. Use quando o mesmo boundary precisa renderizar e executar side effects. `buildWhen` e `listenWhen` continuam independentes.
+
+### `EffectCommandSelector`
+
+Permite observar apenas uma projeção. A variante `.snapshot` observa também fila, pending, trigger, `lastExit` e policy sem transformar essas métricas em novo estado visual.
 
 ## Políticas de execução
 
@@ -194,7 +276,7 @@ As três coordenações são:
 
 `command.cancel()` interrompe a ownership lógica do Command e pode limpar callers enfileirados/trigger-delayed. Isso **não** significa que o `Future` subjacente foi fisicamente cancelado.
 
-O `Runtime` mantém a execução e seus recursos até o trabalho físico terminar. Essa diferença também vale para `latest(cancelPrevious: true)`, dispose e timeout.
+O `Runtime` mantém a execução e seus resources até o trabalho físico terminar. Essa diferença também vale para `latest(cancelPrevious: true)`, dispose e timeout.
 
 Quando uma API externa oferece cancelamento, conecte-a ao `use.cancellation` dentro do `Effect` ou cruze um boundary cooperativo com `use.cancellation.throwIfCancelled()`.
 
@@ -210,11 +292,9 @@ Quando uma API externa oferece cancelamento, conecte-a ao `use.cancellation` den
 
 `BetterEffectLifecyclePolicy` controla fechamento por widget/application exit, grace period e solicitação de interrupção cooperativa. A API distingue ownership `external`, `widget` e `application` para impedir que um subtree feche um Runtime que não possui.
 
-Observação de plataforma: callbacks canceláveis de exit dependem do suporte do Flutter desktop; o callback de detach usado pelo framework tem comportamento específico de iOS/Android. Não trate um único callback de lifecycle como garantia idêntica entre todas as plataformas.
-
 ## Feature scopes
 
-`BetterEffectFeatureScope` cria um child `Runtime` que resolve providers locais primeiro e usa o Runtime pai como fallback. Os recursos da feature sobrevivem a várias telas, ViewModels e Commands e fecham no dispose/restart da feature.
+`BetterEffectFeatureScope` cria um child `Runtime` que resolve providers locais primeiro e usa o Runtime pai como fallback. Os resources da feature sobrevivem a várias telas, ViewModels e Commands e fecham no dispose/restart da feature.
 
 ```dart
 BetterEffectFeatureScope(
@@ -227,7 +307,15 @@ BetterEffectFeatureScope(
 )
 ```
 
-Fechar o child não fecha o pai; fechar o pai coordena seus child Runtimes antes dos recursos parentais.
+Fechar o child não fecha o pai; fechar o pai coordena seus child Runtimes antes dos resources parentais.
+
+## BuildContext
+
+- `context.effectCommands`: read non-listening para factories de ViewModel;
+- `context.watchEffectCommands()`: versão listening para adapters que precisam reagir à troca de scope;
+- `context.effectRuntime`: acesso direto ao Runtime no boundary;
+- `context.runEffect` / `runEffectExit`: execução direta sem Command observável;
+- `context.readEffectService<T>()`: resolução no composition boundary, não uma recomendação para business logic no `build`.
 
 ## Testes
 
@@ -239,7 +327,7 @@ import 'package:better_effect_flutter/testing.dart';
 
 Ela reexporta os helpers de testing do core e adiciona probes de estado/listener/policy e `BetterEffectTestApp`.
 
-O repositório também inclui uma aplicação em `example/` e testes para lifecycle, policies, one-shot listeners, selectors e ownership de Runtime.
+`BetterEffectTestApp` usa `BetterEffectProvider.value`: o teste continua owner do Runtime e deve fechá-lo.
 
 ## Limitações importantes
 
@@ -259,9 +347,11 @@ Consulte o [CHANGELOG](CHANGELOG.md) antes de atualizar uma aplicação existent
 
 ## Documentação e referência
 
-- [Documentação oficial](https://better-effect-dart.vercel.app/docs)
-- [Guia Flutter MVVM](https://better-effect-dart.vercel.app/docs/guides/flutter-mvvm)
+- [Mapa completo do package Flutter](https://better-effect-dart.vercel.app/docs/packages/better_effect_flutter)
+- [Flutter: integração completa](https://better-effect-dart.vercel.app/docs/guides/flutter-mvvm)
+- [Core `better_effect`](https://better-effect-dart.vercel.app/docs/packages/better_effect)
 - [Políticas de Command](https://better-effect-dart.vercel.app/docs/guides/command-policies)
+- [Seletores](https://better-effect-dart.vercel.app/docs/guides/command-selectors)
 - [Feature scopes](https://better-effect-dart.vercel.app/docs/guides/feature-scopes)
 - [API no pub.dev](https://pub.dev/documentation/better_effect_flutter/latest/)
 - [Repositório e issues](https://github.com/nitoba/better-effect-dart)
