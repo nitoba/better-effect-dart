@@ -184,9 +184,10 @@ O mesmo `Effect` pode rodar com outra implementação sem estado global. Adicion
 dart pub add --dev test
 ```
 
-Em `test/load_orders_test.dart`:
+Em `test/load_orders_test.dart`, importe o arquivo usado pelo primeiro exemplo:
 
 ```dart
+import '../bin/main.dart';
 import 'package:test/test.dart';
 
 final class FakeOrdersApi implements OrdersApi {
@@ -213,6 +214,8 @@ test('carrega pedidos usando um override local', () async {
   expect(result.getOrThrow().single.id, 'ord-test');
 });
 ```
+
+Para código de produção, mova as APIs reutilizáveis para `lib/` e prefira um import `package:`. O import relativo acima existe apenas para manter o primeiro tutorial executável sem exigir que o leitor escolha antecipadamente o nome do próprio package.
 
 O teste mantém `OrderRepositoryLive` e `loadOrders()`. Apenas a folha que representa I/O foi substituída.
 
