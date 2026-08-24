@@ -1,109 +1,110 @@
 ---
 title: Visão geral
-description: A arquitetura better_effect em poucos minutos
+description: Effects tipados, dependências contextuais e lifecycle explícito para Dart e Flutter
 ---
 
-`better_effect` é um conjunto de packages Dart e Flutter para construir
-aplicações com dependências explícitas, efeitos assíncronos e falhas tipadas.
+`better_effect` é uma família de packages para descrever operações de aplicação como `Effect<A, E>`, executar essas operações em um ambiente de dependências explícito e manter o ownership de recursos até a conclusão física do trabalho.
 
-## Por que estes packages existem?
+No Flutter, o mesmo modelo é projetado em `EffectCommandState<A, E>` para que a UI consiga distinguir loading, sucesso, falha esperada, defect e interrupção sem espalhar booleans e callbacks pelo widget tree.
 
-Aplicações começam simples: uma função chama um client, o widget mostra um
-`FutureBuilder` e uma exceção vira uma mensagem de erro. Conforme o produto
-cresce, três problemas aparecem juntos:
+A linha documentada atualmente é `0.4.x`.
 
-1. **Dependências ficam invisíveis** — qualquer camada acessa um singleton ou
-   cria seu próprio client.
-2. **Falhas diferentes parecem iguais** — uma validação de negócio, uma perda de
-   conexão e um bug de programação terminam no mesmo `catch`.
-3. **Estado assíncrono perde semântica** — loading, retry, concorrência e
-   efeitos de uma vez são espalhados entre callbacks e booleans.
-
-O objetivo deste projeto é resolver essas três pressões sem exigir um runtime
-complexo, uma linguagem nova ou um framework de aplicação. A proposta é uma
-linha pequena e explícita:
-
-```text
-Effect descreve a operação
-Module descreve de onde vêm as dependências
-Runtime controla execução e lifetimes
-Command projeta a execução em estado de UI
-Analyzer verifica o grafo antes do deploy
-```
-
-## Decisões que orientam o design
-
-### Dart e Flutter continuam sendo Dart e Flutter
-
-Os packages usam `Future`, `async`/`await`, records, pattern matching e as
-convenções do ecossistema. Isso reduz o custo de adoção: a equipe não precisa
-aprender fibers, schedulers ou uma DSL de injeção para começar.
-
-### Falha esperada não é defeito
-
-Uma falha esperada é parte do contrato (`UserNotFound`, `Unauthorized`,
-`NetworkUnavailable`). Um defeito é algo que o programa não conseguiu prever:
-uma dependência ausente, um `Error`, um bug de programação ou falha de cleanup.
-Separá-los deixa cada camada tomar a decisão correta.
-
-### Composição no início, resolução no uso
-
-`Module` fica no composition root, mas o `Effect` pede o serviço quando precisa
-dele. Assim, a lógica de negócio não conhece o container e o mesmo programa
-pode rodar com produção, memória ou fake em testes.
-
-### Lifecycle é uma responsabilidade explícita
-
-Clients, conexões e subscriptions têm dono. `Runtime` mantém recursos da
-aplicação; `Scope` fecha recursos de uma execução; Flutter fecha o Runtime no
-desmonte do subtree. Essa regra evita tanto vazamentos quanto `close()` duplicado.
-
-### Operações precisam ser explicáveis em produção
-
-Labels, metadata por execução e `RuntimeObserver` conectam o mesmo modelo de
-ownership a logs, métricas e tracing. Observabilidade acompanha a execução, mas
-não cria um novo canal de falha nem altera o resultado do Effect.
-
-### Feedback deve chegar antes do CI
-
-O analyzer oferece feedback no editor para erros locais e um checker de grafo
-para a composição completa. Um programa pode estar correto arquivo a arquivo e
-ainda assim faltar um binding no Module raiz — são problemas diferentes, por
-isso existem verificações diferentes.
-
-O projeto é dividido em três camadas, um contrato semântico executável e uma integração oficial para agentes de IA:
+## Escolha o package pelo problema
 
 <Cards>
-  <Card title="better_effect" href="/docs/packages/better_effect" description="Runtime Dart com Effect, Module, escopos, recursos e observabilidade." />
-  <Card title="better_effect_flutter" href="/docs/packages/better_effect_flutter" description="Integração Flutter para Commands, ViewModels e UI reativa." />
-  <Card title="better_effect_analyzer" href="/docs/packages/better_effect_analyzer" description="Plugin e CLI para encontrar problemas no código e no grafo de Modules." />
-  <Card title="Contrato semântico" href="/docs/semantics" description="MUST/MUST NOT versionados e uma suíte independente de conformance para lifecycle e outcomes." />
-  <Card title="IA e Agent Skill" href="/docs/ai" description="Instale a skill oficial e dê aos agentes o modelo mental e as regras do projeto." />
+  <Card title="better_effect" href="/docs/packages/better_effect" description="Core Dart: Effect, Module, Runtime, Scope, recursos, retry, concorrência e observabilidade." />
+  <Card title="better_effect_flutter" href="/docs/packages/better_effect_flutter" description="Integração Flutter: Commands, ViewModels opcionais, widgets, lifecycle e Runtime por feature." />
+  <Card title="better_effect_analyzer" href="/docs/packages/better_effect_analyzer" description="Tooling: warnings no Analysis Server, lints opt-in e validação do grafo de Modules no CI." />
 </Cards>
 
-## O caminho recomendado
+Em uma aplicação Flutter, normalmente basta instalar `better_effect_flutter`: ele depende do core e reexporta sua API pública. O analyzer é uma `dev_dependency` independente.
 
-1. Leia [por que estes packages existem](/docs/getting-started/why-better-effect)
-   e depois o [modelo mental](/docs/getting-started/mental-model).
-2. Siga a [primeira feature](/docs/getting-started/first-feature), instale o
-   [`better_effect`](/docs/packages/better_effect) e defina seu primeiro
-   `Effect`.
-3. Defina ownership com o guia de
-   [recursos e ciclo de vida](/docs/guides/resources-and-lifetimes).
-4. Para request context, transactions ou overrides temporários, use
-   [Modules por execução](/docs/guides/execution-scoped-modules).
-5. Consulte o [contrato semântico normativo](/docs/semantics) quando uma decisão
-   depender de precedence de outcomes, cleanup, interruption ou ownership.
-6. Conecte logs, métricas e tracing pelo guia de
-   [observabilidade](/docs/guides/observability).
-7. Em Flutter, siga o guia de
-   [`better_effect_flutter`](/docs/packages/better_effect_flutter).
-8. Ative os diagnósticos do
-   [`better_effect_analyzer`](/docs/packages/better_effect_analyzer).
-9. Se você usa um coding agent, instale a
-   [Agent Skill oficial](/docs/ai/using-the-skill) para manter sugestões e
-   refatorações alinhadas à API e às semânticas do projeto.
+## O problema que o projeto resolve
 
-Os packages são publicados de forma independente no pub.dev. Consulte o
-[guia de releases](/docs/maintainers/releases) quando for publicar uma nova
-versão.
+Em aplicações pequenas, `Future`, exceptions e um client acessado diretamente pelo widget podem ser suficientes. A dificuldade aparece quando as mesmas operações passam a precisar responder, de forma consistente, a perguntas como:
+
+- essa condição é uma falha que o produto conhece ou um bug inesperado?
+- qual implementação de um serviço esta execução deve usar?
+- quem possui uma conexão, subscription ou transaction e quando ela fecha?
+- o segundo toque deve ser ignorado, substituir a execução visível ou entrar em fila?
+- uma interrupção da UI realmente cancelou o `Future` ou apenas deixou de esperar seu resultado?
+- o grafo de dependências continua completo depois de uma refatoração?
+
+A família separa essas responsabilidades:
+
+```text
+Module       descreve o ambiente
+   ↓
+Runtime      possui serviços, execuções e recursos
+   ↓
+Effect<A, E> descreve a operação
+   ↓
+Exit<A, E>   preserva o outcome completo
+   ↓
+Command      projeta a execução para Flutter, quando necessário
+```
+
+## O primeiro princípio: nem todo erro é igual
+
+`better_effect` trabalha com três categorias que não devem ser misturadas:
+
+| Categoria | Exemplo | Representação |
+| --- | --- | --- |
+| sucesso | usuário carregado | `A` / `ExitSuccess` |
+| falha esperada | credencial inválida, offline, regra de negócio | `E` / `ExitFailure` |
+| defect | `Error`, dependência ausente, bug, falha de cleanup | `ExitDefect` ou exceção na API baseada em `Result` |
+
+Interrupção é um quarto outcome em `Exit`: `ExitInterrupted`.
+
+`Runtime.run` e `Module.run` devolvem `ResultDart<A, E>` e repropagam defects como exceções. Use `runExit` quando a borda precisa inspecionar o outcome completo como valor.
+
+## Comece em poucos passos
+
+1. [Instale somente os packages que sua camada precisa](/docs/getting-started/installation).
+2. Leia o [modelo mental](/docs/getting-started/mental-model) para entender `Effect`, `Module`, `Runtime`, `Scope` e `Exit`.
+3. Execute a [primeira feature](/docs/getting-started/first-feature), que usa uma API realista e um override de teste.
+4. Aprofunde [falhas e composição de Effects](/docs/guides/effects).
+5. Defina ownership com [recursos e ciclo de vida](/docs/guides/resources-and-lifetimes).
+6. No Flutter, siga [Flutter MVVM e Commands](/docs/guides/flutter-mvvm).
+7. Antes do CI, ative os [diagnósticos do analyzer](/docs/guides/diagnostics).
+
+Depois disso, escolha guias avançados conforme o problema: [coleções](/docs/guides/collection-composition), [retry](/docs/guides/retry), [Modules por execução](/docs/guides/execution-scoped-modules), [feature scopes](/docs/guides/feature-scopes) e [observabilidade](/docs/guides/observability).
+
+## O que a biblioteca garante — e o que ela não promete
+
+As garantias estáveis de lifecycle e outcomes são versionadas em [`SEMANTICS.md`](https://github.com/nitoba/better-effect-dart/blob/main/SEMANTICS.md) e verificadas pelo package interno de conformance. Consulte o [contrato semântico](/docs/semantics) quando uma decisão depender de precedence de cleanup, interruption, retry, concorrência ou ownership.
+
+Algumas limitações são intencionais:
+
+- Dart não oferece cancelamento físico geral de qualquer `Future`; timeout e interruption podem encerrar a espera lógica antes do trabalho físico;
+- `Effect.tryAsync` captura `Exception`, não todo objeto lançado; `tryAll` é a fronteira explícita para capturar tudo;
+- `EffectClock` e `EffectRandom` não são instalados implicitamente;
+- `better_effect_flutter` não substitui um state manager ou roteador;
+- as lints arquiteturais do analyzer são opt-in e não são tratadas como verdades universais.
+
+## Versão, compatibilidade e migração
+
+Os três packages do monorepo estão na linha `0.4.x`, mas são publicados de forma independente. Antes de copiar um exemplo, confirme a versão realmente instalada no `pubspec.lock`.
+
+Mudanças relevantes por release ficam nos `CHANGELOG.md` de cada package. Alterações de semântica estável também precisam de uma entrada no [ledger de migrações semânticas](https://github.com/nitoba/better-effect-dart/blob/main/docs/semantic-migrations.md).
+
+APIs depreciadas devem ser tratadas como caminho de migração, não como recomendação para código novo. No Flutter, por exemplo, `BetterEffectLifecyclePolicy` substitui parâmetros legados de fechamento; `CommandPolicy` é a API preferida quando a coordenação precisa ir além do shorthand `EffectCommandConcurrency`.
+
+## Documentação para humanos e agentes
+
+A documentação é a mesma fonte canônica para ambos. Para agentes, o site publica formatos de descoberta que evitam depender de scraping de HTML:
+
+- [`llms.txt`](https://better-effect-dart.vercel.app/llms.txt): mapa das páginas;
+- [`llms-full.txt`](https://better-effect-dart.vercel.app/llms-full.txt): corpus completo como fallback;
+- [Agent Skill oficial](/docs/ai/using-the-skill): regras de implementação, review e refatoração.
+
+Um agente deve sempre preferir a API da versão instalada no projeto quando ela divergir da documentação da linha atual.
+
+## Referências
+
+<Cards>
+  <Card title="Contrato semântico" href="/docs/semantics" description="Regras normativas de lifecycle, outcomes, scopes, concorrência, retry e Commands." />
+  <Card title="Guias" href="/docs/guides" description="Fluxos de uso por problema, do core ao Flutter." />
+  <Card title="Packages" href="/docs/packages" description="Responsabilidade, compatibilidade e API de cada package." />
+  <Card title="IA e Agent Skill" href="/docs/ai" description="Índices LLM, skill oficial e orientação para coding agents." />
+</Cards>
