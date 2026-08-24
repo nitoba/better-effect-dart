@@ -1,134 +1,207 @@
 ---
 title: Diagnósticos e CI
-description: Encontre problemas locais e valide o grafo completo antes do deploy
+description: Use o plugin para feedback local e o graph checker para validar a composição completa
 ---
 
-O analyzer existe porque dois tipos de problema exigem duas escalas de análise.
-Uma regra local pode dizer que um `Effect` foi descartado; somente uma análise
-do projeto inteiro consegue dizer que o Module raiz não fornece o serviço que
-uma biblioteca solicita.
+O analyzer resolve dois problemas diferentes. Um `Effect` descartado pode ser detectado no arquivo em que foi escrito; um serviço ausente no `Module` raiz só pode ser confirmado depois que a composição do projeto é conhecida.
 
 ```text
-Analysis Server plugin → arquivo atual, IDE, dart analyze, flutter analyze
-Graph checker           → lib inteira, roots, composição, CI
+Analysis Server plugin → feedback local durante edição/analyze
+Graph checker           → roots, Modules, dependências e CI
 ```
 
+A linha documentada aqui é `better_effect_analyzer 0.4.x`.
+
 ## Ative o plugin
+
+No `analysis_options.yaml` raiz:
 
 ```yaml
 include: package:flutter_lints/flutter.yaml
 
 plugins:
   better_effect_analyzer:
-    version: ^0.1.3
+    version: ^0.4.0
+```
+
+Depois de salvar, reinicie o Dart Analysis Server da IDE.
+
+Ao ser habilitado, o plugin registra sete warnings de correção. As lints arquiteturais e de migração são opt-in.
+
+## Warnings de correção
+
+### `discarded_effect`
+
+Effects são lazy. Criar um `Effect` e descartar o valor não inicia I/O:
+
+```dart
+repository.save(user); // warning
+```
+
+Componha ou execute a operação:
+
+```dart
+await use.unwrap(repository.save(user));
+return repository.save(user);
+await runtime.run(repository.save(user));
+```
+
+### `discarded_effect_execution`
+
+`Runtime.execute` devolve um handle gerenciado. Se o código cria esse handle e perde a referência, o caller também perde a forma explícita de observar o `Exit`:
+
+```dart
+runtime.execute(syncOrders()); // warning
+```
+
+Observe ou retorne a execução:
+
+```dart
+final execution = runtime.execute(syncOrders());
+final exit = await execution.exit;
+```
+
+### `runtime_started_without_close`
+
+Um Runtime criado com `Module.start()` possui recursos e precisa de um owner:
+
+```dart
+final runtime = await appModule.start(); // warning se o fechamento não for verificável
+```
+
+O padrão local é:
+
+```dart
+final runtime = await appModule.start();
+try {
+  await runtime.run(program);
+} finally {
+  await runtime.close();
+}
+```
+
+O mesmo diagnóstico também considera child Runtimes criados manualmente com `Runtime.fork`.
+
+### `unawaited_effect_context_operation`
+
+`use.unwrap`, `use.result`, `use.tryAsync` e `use.acquire` devolvem Futures. Ignorar o Future perde o valor e a propagação esperada:
+
+```dart
+use.unwrap(repository.save(user)); // warning
+```
+
+Use `await` ou devolva o Future conforme a assinatura do callback:
+
+```dart
+await use.unwrap(repository.save(user));
+```
+
+### `missing_binding_type_argument`
+
+Constructor tear-offs são `Function`. Declare o contrato que o grafo deve enxergar:
+
+```dart
+final module = Module([
+  .provide<Database>(DatabaseLive.new),
+]);
+```
+
+Um `ServiceKey<T>` tipado também pode fornecer a restrição de inferência.
+
+### `incompatible_provider`
+
+A implementação, instância ou resource precisa satisfazer o contrato registrado:
+
+```dart
+Module([
+  .provide<UserRepository>(AnalyticsService.new), // warning
+]);
+```
+
+### `duplicate_service_binding`
+
+A identidade de um binding é o tipo de serviço + `ServiceKey` opcional. Duplicar a mesma identidade no mesmo `Module` é inválido:
+
+```dart
+Module([
+  .provide<Database>(SqliteDatabase.new),
+  .provide<Database>(MemoryDatabase.new), // warning
+]);
+```
+
+Quando duas implementações são intencionais, use keys diferentes.
+
+## Lints opt-in
+
+Ative somente as regras que representam o contrato arquitetural do projeto:
+
+```yaml
+plugins:
+  better_effect_analyzer:
+    version: ^0.4.0
     diagnostics:
+      effect_command_not_owned: true
+      closed_runtime_exposed: true
+      module_root_not_complete: true
       repository_requests_repository: true
       viewmodel_requests_service: true
       widget_requests_business_dependency: true
       singleton_viewmodel: true
 ```
 
-As cinco regras de correção são ativadas com o plugin. As quatro regras de
-arquitetura são opt-in porque equipes podem escolher fronteiras diferentes.
-Depois de alterar o YAML, reinicie o Analysis Server.
-
-## O que o plugin evita
-
-### Effect descartado
-
-Effects são lazy. Este código cria uma operação mas não a executa:
-
-```dart
-repository.save(user); // warning
-```
-
-O correto é explicitar a intenção:
-
-```dart
-// Dentro de um Effect.result:
-await use.unwrap(repository.save(user));
-
-// Fora do contexto, devolva a descrição para um Runtime executar:
-Effect<Unit, SaveFailure> saveUser(User user) => repository.save(user);
-```
-
-### Context operation sem await
-
-`use.unwrap`, `use.result`, `use.tryAsync` e `use.acquire` devolvem Futures.
-Ignorar o Future também ignora a propagação da falha:
-
-```dart
-use.unwrap(repository.save(user)); // warning
-```
-
-Use `await` dentro do corpo do Effect ou devolva o Future para o chamador:
-
-```dart
-await use.unwrap(repository.save(user));
-
-Future<Unit> persist(User user, EffectContext<SaveFailure> use) {
-  return use.unwrap(repository.save(user));
-}
-```
-
-### Binding sem contrato
-
-Constructor tear-offs são `Function`. Informe o serviço que o resto do grafo
-deve enxergar:
-
-```dart
-Module([
-  .provide<Database>(DatabaseLive.new),
-]);
-```
-
-### Provider incompatível ou duplicado
-
-```dart
-Module([
-  .provide<UserRepository>(AnalyticsService.new), // incompatível
-  .provide<Database>(SqliteDatabase.new),
-  .provide<Database>(MemoryDatabase.new), // identidade duplicada
-]);
-```
-
-Use `ServiceKey` quando duas implementações do mesmo tipo são intencionais.
-
-## Regras arquiteturais e direção da dependência
-
-As regras opcionais reforçam uma direção simples:
+As quatro últimas reforçam a direção sugerida pelo package Flutter:
 
 ```text
 Widget → ViewModel → Repository / UseCase → Service / Client
 ```
 
-- Repository não pede outro Repository;
-- ViewModel não acessa client, database ou storage diretamente;
-- Widget não resolve dependência de negócio;
-- ViewModel não vira singleton de vida inteira por acidente.
+Isso é uma escolha de arquitetura. Uma equipe que usa boundaries diferentes não deve habilitar a lint apenas porque ela existe.
 
-Essas regras não são estética. Elas evitam que UI, infraestrutura e domínio se
-acoplem e tornam o teste de cada camada menor.
+`effect_command_not_owned`, `closed_runtime_exposed` e `module_root_not_complete` ajudam a tornar lifecycle e composition roots mais explícitos durante adoção/migração.
 
-## Graph checker: a visão que o arquivo não tem
+## Quick fixes
 
-Rode a partir da raiz do projeto:
+O plugin registra transforms somente para casos locais em que consegue preservar a intenção com segurança. A linha atual inclui fixes para:
+
+- observar ou retornar um `EffectExecution` descartado;
+- envolver um Runtime local em `try/finally`;
+- registrar ownership de um `EffectCommand`;
+- transformar um root visível em `Module.complete`.
+
+O analyzer não gera uma arquitetura inteira quando o ownership não pode ser inferido.
+
+## Graph checker: a visão global
+
+Adicione `better_effect_analyzer` a `dev_dependencies` e rode na raiz do projeto:
 
 ```bash
 dart run better_effect_analyzer
 ```
 
-O checker indexa constructors, `use<T>()`, `Effect.service<T>()`, callbacks de
-resource, spreads, `Module.merge` e `overrideWith`. Depois ele constrói o grafo
-dos Modules raiz e procura:
+O checker analisa composição que pode atravessar vários arquivos e valida:
 
-- serviço ausente;
-- ciclo de dependência;
-- Module recursivo;
-- Module indicado que não existe;
-- provider incompatível após composição.
+- serviços ausentes em roots completos;
+- ciclos de dependência;
+- ciclos de composição de `Module`;
+- `Module`s selecionados que não existem;
+- providers duplicados ou incompatíveis depois de `merge`/`overrideWith`;
+- ordem inválida de dependências entre resources;
+- ownership/lifecycle coberto também por diagnósticos do plugin.
 
-Para selecionar roots explicitamente:
+## Quando usar `Module.complete`
+
+`Module.complete` marca estaticamente um composition root que deve fornecer todas as dependências alcançáveis:
+
+```dart
+final appModule = Module.complete([
+  .provide<ApiClient>(ApiClientLive.new),
+  .provide<UserRepository>(UserRepositoryLive.new),
+]);
+```
+
+O marker não altera o comportamento do Runtime. Ele dá ao analyzer evidência explícita de que aquele grafo pretende ser completo.
+
+Roots também podem ser selecionados na CLI:
 
 ```bash
 dart run better_effect_analyzer \
@@ -136,40 +209,120 @@ dart run better_effect_analyzer \
   --module backgroundModule
 ```
 
-Inclua fixtures quando necessário:
+## Overlays e child Runtimes
+
+A análise distingue um root completo de um ambiente scoped. `runWith`, `runExitWith`, `executeWith`, `Runtime.fork` e `BetterEffectFeatureScope` podem depender de serviços fornecidos pelo ambiente pai.
+
+O analyzer continua validando dentro do overlay:
+
+- duplicatas;
+- compatibilidade de providers;
+- ciclos locais;
+- ordem de resources.
+
+Ele não exige que um child repita bindings que pertencem corretamente ao parent apenas para “fechar” o grafo local.
+
+## Investigue o grafo
+
+Inclua testes no índice:
 
 ```bash
 dart run better_effect_analyzer --include-tests
 ```
 
-## Saídas para automação
-
-Humana:
+Explique um Module:
 
 ```bash
-dart run better_effect_analyzer
+dart run better_effect_analyzer --explain appModule
 ```
 
-Machine-readable, para anotações e scripts:
+Descubra por que um serviço é necessário:
+
+```bash
+dart run better_effect_analyzer --why UserRepository
+```
+
+Procure declarações provadamente não alcançáveis a partir dos complete roots:
+
+```bash
+dart run better_effect_analyzer --unused
+```
+
+## Formatos para automação
+
+Diagnósticos:
 
 ```bash
 dart run better_effect_analyzer --format machine
 dart run better_effect_analyzer --format json
+dart run better_effect_analyzer --format sarif
 ```
 
-O comando termina com código diferente de zero quando encontra erros. Mantenha
-`dart analyze --fatal-infos` e o graph checker no CI para validar tanto regras
-locais quanto composição.
+Grafo:
 
-## Quando suprimir uma regra
-
-Uma exceção pontual pode usar a sintaxe normal do Dart:
-
-```dart
-// ignore: better_effect_analyzer/discarded_effect
-repository.save(user);
+```bash
+dart run better_effect_analyzer --graph --format text
+dart run better_effect_analyzer --graph --format json
+dart run better_effect_analyzer --graph --format dot
+dart run better_effect_analyzer --graph --format mermaid
 ```
 
-Se a decisão vale para o projeto inteiro, remova a regra do mapa `diagnostics`
-em vez de espalhar supressões. A configuração deve contar a história da
-arquitetura.
+Grave em arquivo com `--output`/`-o`. Consulte a versão pública do schema com:
+
+```bash
+dart run better_effect_analyzer --schema-version
+```
+
+Warnings são fatais por padrão no CLI. Para um pipeline que deliberadamente aceita warnings:
+
+```bash
+dart run better_effect_analyzer --no-fatal-warnings
+```
+
+## Um gate de CI razoável
+
+O analyzer complementa, não substitui, o analyzer padrão do Dart/Flutter:
+
+```bash
+dart analyze --fatal-infos
+dart run better_effect_analyzer
+```
+
+Em Flutter:
+
+```bash
+flutter analyze --fatal-infos
+dart run better_effect_analyzer
+```
+
+O primeiro comando verifica a linguagem, lints e plugin. O segundo valida a composição completa que foi possível indexar.
+
+## Supressões
+
+Para uma exceção pontual, use a sintaxe normal de ignore do analyzer com o código emitido pelo diagnóstico.
+
+Se uma lint arquitetural não representa a arquitetura do projeto inteiro, remova-a de `diagnostics` em vez de espalhar ignores. A configuração deve comunicar quais regras a equipe escolheu adotar.
+
+## Troubleshooting
+
+### O plugin não aparece na IDE
+
+Confirme que `analysis_options.yaml` está na raiz, que `version` resolve, e reinicie o Analysis Server. Em desenvolvimento local, `path` do plugin deve ser absoluto.
+
+### O Flutter reporta conflito de analyzer
+
+A release `0.4.x` usa `analysis_server_plugin >=0.3.14 <0.3.18` e `analyzer ^12.1.0`. Verifique a versão fixada pelo SDK Flutter antes de alterar constraints.
+
+### O graph checker acusa falta de binding em uma feature
+
+Confirme que o boundary foi reconhecido como overlay/child Runtime. Uma feature pode depender legitimamente do parent. Não duplique um binding apenas para silenciar a ferramenta sem entender o ownership.
+
+### O analyzer não reconhece composição muito dinâmica
+
+A ferramenta é estática. Factories e composição construídas de forma opaca em runtime podem não ser prováveis a partir do source. Nesses casos, torne o composition root mais explícito ou selecione roots manualmente quando possível.
+
+## Limitação importante
+
+Ausência de diagnóstico não é prova de comportamento runtime para código que a análise estática não consegue modelar. As garantias de lifecycle/outcome da biblioteca continuam definidas pelo source, pelos testes e pelo [contrato semântico](/docs/semantics).
+
+Veja também a página do [`better_effect_analyzer`](../packages/better_effect_analyzer) e o [CHANGELOG](https://github.com/nitoba/better-effect-dart/blob/main/packages/better_effect_analyzer/CHANGELOG.md).

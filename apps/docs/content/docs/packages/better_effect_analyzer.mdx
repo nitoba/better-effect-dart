@@ -1,59 +1,182 @@
 ---
 title: better_effect_analyzer
-description: Diagnósticos no editor e validação do grafo de Modules
+description: Warnings locais, lints opt-in e validação do grafo de Modules
 ---
+
+`better_effect_analyzer` é o tooling oficial para projetos que usam `better_effect` e `better_effect_flutter`. Ele atua em duas escalas: o plugin do Dart Analysis Server encontra problemas locais durante a edição; o graph checker analisa a composição do projeto inteiro.
+
+O package é tooling. Ele não participa do `Runtime`, não é necessário para executar um `Effect` e deve ser instalado como dependência de desenvolvimento quando a CLI/API de grafo for usada.
+
+## Compatibilidade
+
+```text
+Package                 0.4.x
+Dart                    >=3.10.0 <4.0.0
+analysis_server_plugin  >=0.3.14 <0.3.18
+analyzer                 ^12.1.0
+```
+
+Em aplicações Flutter, a compatibilidade real também depende da linha de `analyzer` fixada pelo SDK instalado. Não aumente esses constraints sem verificar o SDK.
 
 ## Duas camadas de análise
 
-O analyzer oferece:
+```text
+Analysis Server plugin → arquivo/contexto resolvido, IDE, dart/flutter analyze
+Graph checker           → roots, Modules, providers e dependências do projeto
+```
 
-1. um plugin do Analysis Server, para feedback imediato no editor;
-2. um comando de verificação do grafo completo, útil no CI.
+O plugin não deve adivinhar qual `Module` representa o root completo de uma aplicação. O graph checker pode fazer essa pergunta explicitamente e construir uma visão global sem transformar cada diagnóstico do editor em uma análise de projeto inteiro.
 
-Essa divisão nasceu de uma limitação importante: o Analysis Server conhece o
-arquivo e o contexto resolvido que está editando, mas não deve adivinhar qual
-Module a aplicação escolheu como root. O checker de projeto pode fazer essa
-pergunta explicitamente sem tornar cada regra do editor lenta.
+## Instalação
 
-## Ativar no editor
+Para usar a CLI ou a API pública de grafo:
+
+```bash
+dart pub add --dev better_effect_analyzer
+```
+
+Ative o plugin no `analysis_options.yaml` raiz:
 
 ```yaml
 plugins:
   better_effect_analyzer:
+    version: ^0.4.0
+```
+
+Reinicie o Dart Analysis Server depois de alterar a seção `plugins`.
+
+## Warnings de correção
+
+Ao ativar o plugin, a linha `0.4.x` registra sete warnings:
+
+| Código | Detecta |
+| --- | --- |
+| `discarded_effect` | `Effect` lazy criado e descartado sem composição/execução |
+| `discarded_effect_execution` | `EffectExecution` descartado sem observar ou retornar seu resultado |
+| `runtime_started_without_close` | `Runtime` iniciado localmente sem ownership de fechamento verificável |
+| `unawaited_effect_context_operation` | operação assíncrona de `EffectContext` ignorada sem `await`/return |
+| `missing_binding_type_argument` | binding constructor-backed cujo contrato não fica claro |
+| `incompatible_provider` | implementação que não satisfaz o contrato registrado |
+| `duplicate_service_binding` | duas declarações com a mesma identidade de tipo + key |
+
+Essas regras tratam problemas de correção, lifecycle e identidade de binding. Elas não dependem de a equipe adotar a arquitetura MVVM sugerida pelo package Flutter.
+
+## Lints opt-in
+
+As sete lints abaixo são conservadoras e precisam ser habilitadas explicitamente:
+
+```yaml
+plugins:
+  better_effect_analyzer:
+    version: ^0.4.0
     diagnostics:
+      effect_command_not_owned: true
+      closed_runtime_exposed: true
+      module_root_not_complete: true
       repository_requests_repository: true
       viewmodel_requests_service: true
       widget_requests_business_dependency: true
       singleton_viewmodel: true
 ```
 
-As regras básicas ficam disponíveis ao ativar o plugin. As regras de arquitetura
-são opt-in para que cada aplicação escolha seu nível de restrição.
+As regras `repository_requests_repository`, `viewmodel_requests_service`, `widget_requests_business_dependency` e `singleton_viewmodel` refletem uma direção arquitetural sugerida, não uma verdade universal:
 
-## Verificar o grafo no CI
-
-```bash
-dart run better_effect_analyzer --help
+```text
+Widget → ViewModel → Repository / UseCase → Service / Client
 ```
 
-O executável atual aceita o caminho do projeto como argumento; para o uso mais
-comum, a partir da raiz do app, basta:
+Habilite-as somente quando essa fronteira fizer parte do contrato arquitetural do projeto.
+
+As outras três ajudam a tornar ownership de Commands/Runtimes e roots completos mais explícitos durante migrações.
+
+## Quick fixes
+
+A versão atual registra fixes locais para casos em que a transformação é suficientemente segura, incluindo observar/retornar um `EffectExecution`, envolver um Runtime local em `try/finally`, registrar ownership de Command e converter um root visível para `Module.complete`.
+
+Quando o ownership não pode ser inferido com confiança, o analyzer prefere diagnosticar a gerar arquitetura automaticamente.
+
+## Graph checker
+
+Rode a partir da raiz da aplicação:
 
 ```bash
 dart run better_effect_analyzer
 ```
 
-O checker encontra Modules raiz, percorre os bindings e reporta dependências
-ausentes, Modules inexistentes e ciclos conforme a configuração.
+O checker indexa os `Module`s e as dependências descobertas e valida, entre outros pontos:
 
-Leia o [guia de diagnósticos](../guides/diagnostics) para entender cada regra.
+- serviços ausentes em roots completos;
+- ciclos de dependência e de composição;
+- `Module`s explicitamente selecionados que não existem;
+- providers duplicados ou incompatíveis após composição/override;
+- dependências entre resources incompatíveis com a ordem de startup;
+- alguns problemas de ownership que possuem o mesmo código no plugin.
 
-## Adoção gradual
+`Module.complete` é um marker estático para indicar que determinado root deve satisfazer todas as dependências alcançáveis. Ele não muda o comportamento do Runtime.
 
-1. instale o plugin sem regras arquiteturais;
-2. corrija Effects descartados, bindings ambíguos e incompatíveis;
-3. ative as regras de MVVM uma por vez;
-4. adicione o graph checker ao CI quando o composition root estiver definido.
+Ambientes criados com `Runtime.fork`, `BetterEffectFeatureScope`, `runWith`, `runExitWith` ou `executeWith` são tratados como overlays/scopes: o grafo local continua validando seus próprios providers, ciclos e resources, enquanto requisitos fornecidos pelo parent/root podem permanecer externos.
 
-O analyzer é tooling e não é dependência do Runtime. Removê-lo não altera o
-binário da aplicação; mantê-lo no CI impede que o grafo regresse silenciosamente.
+## Roots e inspeção
+
+Selecione roots explicitamente:
+
+```bash
+dart run better_effect_analyzer \
+  --module appModule \
+  --module backgroundModule
+```
+
+Inclua arquivos de teste quando necessário:
+
+```bash
+dart run better_effect_analyzer --include-tests
+```
+
+Explique uma composição ou uma dependência:
+
+```bash
+dart run better_effect_analyzer --explain appModule
+dart run better_effect_analyzer --why UserRepository
+dart run better_effect_analyzer --unused
+```
+
+## Formatos e CI
+
+Diagnósticos:
+
+```bash
+dart run better_effect_analyzer --format machine
+dart run better_effect_analyzer --format json
+dart run better_effect_analyzer --format sarif
+```
+
+Exportação do grafo:
+
+```bash
+dart run better_effect_analyzer --graph --format dot
+dart run better_effect_analyzer --graph --format mermaid
+```
+
+`--output/-o` grava a saída em arquivo e `--schema-version` informa a versão pública do schema. Warnings são fatais por padrão na CLI; `--no-fatal-warnings` altera essa política quando isso for uma decisão explícita do pipeline.
+
+## API pública para tooling
+
+```dart
+import 'package:better_effect_analyzer/better_effect_analyzer.dart';
+```
+
+A biblioteca exporta `BetterEffectGraphChecker`, `BetterEffectGraph`, os modelos versionados, queries e `BetterEffectGraphRenderer`. Use essa API quando uma ferramenta precisa consumir a análise sem parsear stdout da CLI.
+
+## Limitações
+
+A análise continua sendo estática. Factories executadas dinamicamente, composição opaca ou ownership que só existe em runtime podem não ser prováveis a partir do source. O analyzer evita transformar ausência de evidência estática em uma garantia que não pode verificar.
+
+Uma lint arquitetural que não representa as regras do seu time deve ser desativada no mapa `diagnostics`; `ignore` local deve ser reservado para exceções pontuais.
+
+## Próximos passos
+
+- [Instalação](/docs/getting-started/installation)
+- [Diagnósticos e CI](/docs/guides/diagnostics)
+- [Packages](/docs/packages)
+- [CHANGELOG no repositório](https://github.com/nitoba/better-effect-dart/blob/main/packages/better_effect_analyzer/CHANGELOG.md)
+- [API no pub.dev](https://pub.dev/documentation/better_effect_analyzer/latest/)

@@ -1,21 +1,26 @@
 ---
 title: Guias
-description: Padrões práticos para Effects, concorrência, lifecycle, observabilidade, Flutter, testes e CI
+description: Padrões práticos para Effects, concorrência, lifecycle, Flutter, observabilidade, testes e CI
 ---
 
 Depois do primeiro fluxo, estes guias ajudam a tomar decisões que normalmente
 causam bugs em produção: tratamento de falhas, concorrência, ownership de
-recursos, contexto por execução, observabilidade, testes e validação
-arquitetural.
+resources, contexto por execução, observabilidade, integração Flutter, testes e
+validação arquitetural.
+
+O guia Flutter é deliberadamente transversal: ele começa no `Effect` do core e
+mostra como Runtime, scopes, Commands, ViewModels e widgets formam uma única
+arquitetura. Use-o quando a dúvida for “como as peças se encaixam?”; use os guias
+de Command/feature/testing quando precisar aprofundar uma área específica.
 
 <Cards>
-  <Card title="Efeitos e falhas tipadas" href="/docs/guides/effects" description="Modele operações, componha Results e preserve a diferença entre falha esperada e defeito." />
+  <Card title="Efeitos e falhas tipadas" href="/docs/guides/effects" description="Modele operações, componha Results e preserve a diferença entre falha esperada e defect." />
   <Card title="Coleções e concorrência limitada" href="/docs/guides/collection-composition" description="Execute lotes com scheduling FIFO, ordem estável, limites explícitos e ownership físico seguro." />
   <Card title="Retry determinístico" href="/docs/guides/retry" description="Repita somente falhas tipadas com Clock substituível, jitter e um Scope por tentativa." />
-  <Card title="Recursos e ciclo de vida" href="/docs/guides/resources-and-lifetimes" description="Escolha entre Module.resource, use.acquire e os lifetimes de bindings." />
+  <Card title="Resources e ciclo de vida" href="/docs/guides/resources-and-lifetimes" description="Escolha entre Module.resource, use.acquire e os lifetimes de bindings." />
   <Card title="Modules por execução" href="/docs/guides/execution-scoped-modules" description="Forneça request context, transactions e overrides temporários sem alterar o Runtime raiz." />
-  <Card title="Observabilidade" href="/docs/guides/observability" description="Conecte execuções, dependências e recursos a logs, métricas e tracing." />
-  <Card title="Flutter MVVM" href="/docs/guides/flutter-mvvm" description="Commands, estados observáveis, ownership e políticas de concorrência." />
+  <Card title="Observabilidade" href="/docs/guides/observability" description="Conecte execuções, dependências e resources a logs, métricas e tracing." />
+  <Card title="Flutter: integração completa" href="/docs/guides/flutter-mvvm" description="Do Effect Dart ao widget: Runtime, providers, feature scopes, Commands, ViewModels, Builder, Listener, Consumer, Selector e testing." />
   <Card title="Políticas de Command" href="/docs/guides/command-policies" description="Combine drop, latest, queue, debounce, throttle e overflow com outcomes determinísticos." />
   <Card title="Seletores de Command" href="/docs/guides/command-selectors" description="Isole rebuilds com seleção tipada, igualdade customizada, snapshots e buildWhen." />
   <Card title="Feature scopes" href="/docs/guides/feature-scopes" description="Compartilhe resources entre ViewModels e Commands com um child Runtime que fecha junto da feature." />

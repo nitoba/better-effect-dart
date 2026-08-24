@@ -1,27 +1,58 @@
 ---
 title: better_effect
-description: Effects, dependency injection, scopes, recursos e observabilidade para Dart
+description: Core Dart para Effects tipados, dependências contextuais e ownership de resources
 ---
 
-## Para que serve
+`better_effect` é o core Dart da família. Ele descreve operações lazy com `Effect<A, E>`, materializa dependências com `Module`/`Runtime` e mantém resources associados ao owner correto por meio de `Scope`.
 
-`better_effect` é a camada de runtime da família. Ele combina:
+Use o package em código Dart que precisa combinar I/O, falhas esperadas, dependências substituíveis e lifecycle explícito. Não há dependência de Flutter.
 
-- `Effect<A, E>` para operações lazy com falha tipada;
-- `Effect.all` e `Effect.forEach` para coleções ordenadas com concorrência limitada;
-- `Effect.retry` para falhas tipadas com policies e um Scope por tentativa;
-- `Module` para declarar serviços, lifetimes e resources;
-- `Runtime` e `Scope` para controlar execução e ciclo de vida;
-- `Runtime.fork` para ambientes de feature com fallback para um Runtime pai;
-- `EffectExecution` para interrupção cooperativa e ownership físico;
-- `EffectLocal` para contexto por execução;
-- `RuntimeObserver` para logs, métricas, tracing e diagnóstico operacional.
+## O core continua sendo o runtime de uma aplicação Flutter
 
-O core é Dart-only. Ele não importa Flutter, não impõe um state manager e não
-cria um service locator global. Pode ser usado em packages de domínio, CLI,
-backend Dart, workers e na camada compartilhada de uma aplicação Flutter.
+`better_effect_flutter` não substitui estas APIs. Ele depende deste package e reexporta sua superfície pública. Em uma aplicação Flutter, repositories, services, use cases e Effects continuam usando `Effect`, `Module`, `Runtime`, `Scope`, `Exit`, retry, concorrência, resources e observabilidade exatamente como em qualquer outro programa Dart.
 
-## Primeiro Effect
+A camada Flutter entra **depois**, quando uma execução precisa ser possuída pela árvore ou projetada em estado visual:
+
+```text
+better_effect
+Module → Runtime → Effect<A, E> → Exit<A, E>
+                    │
+                    │ executado por
+                    ▼
+better_effect_flutter
+EffectCommand → EffectCommandState → Widget
+```
+
+Por isso, ao estudar uma aplicação Flutter com esta família, não trate as páginas do core como documentação “somente para Dart puro”. Elas documentam o runtime que está por baixo dos Commands Flutter.
+
+Veja o [mapa dos packages](/docs/packages) para a relação completa ou avance para [`better_effect_flutter`](/docs/packages/better_effect_flutter) quando já dominar `Effect`, `Module` e `Runtime`.
+
+## Compatibilidade
+
+```text
+Package  0.4.x
+Dart     >=3.10.0 <4.0.0
+```
+
+Dependências diretas da release `0.4.0`: `result_dart ^2.2.0`, `auto_injector ^2.2.0` e `matcher ^0.12.17`.
+
+## API pública em um mapa
+
+| Área | APIs principais | Para quê |
+| --- | --- | --- |
+| descrição de operação | `Effect<A, E>`, `EffectContext<E>` | sucesso/falha tipada, composição e acesso contextual |
+| outcomes | `ExitSuccess`, `ExitFailure`, `ExitDefect`, `ExitInterrupted` | preservar o resultado completo de uma execução |
+| DI | `Module`, `Binding`, `Lifetime`, `ServiceKey`, `Services` | declarar e resolver o ambiente |
+| runtime | `Runtime`, `EffectExecution`, `CancellationSignal` | executar, acompanhar, interromper e fechar trabalho |
+| resources | `Scope`, `EffectContext.acquire` | ownership e finalizers por runtime/execução |
+| contexto local | `EffectLocal`, `EffectLocalBinding` | valores contextuais por execução e metadata |
+| resiliência | `RetryPolicy`, `EffectClock`, `EffectRandom` | retry determinístico e testável |
+| observabilidade | `RuntimeObserver` e eventos | logs, métricas, tracing e diagnóstico |
+| testing | `package:better_effect/testing.dart` | runtime/clock/observer/matchers para testes |
+
+O arquivo `better_effect.dart` também reexporta `result_dart`.
+
+## Primeiro programa
 
 ```dart
 import 'package:better_effect/better_effect.dart';
@@ -30,34 +61,122 @@ sealed class AppFailure implements Exception {
   const AppFailure();
 }
 
-final class NetworkFailure extends AppFailure {
-  const NetworkFailure(this.message);
-  final String message;
+final class LoadFailure extends AppFailure {
+  const LoadFailure(this.cause);
+  final Exception cause;
 }
 
-abstract interface class GreetingApi {
-  Future<String> fetchGreeting();
+abstract interface class MessageSource {
+  Future<String> load();
 }
 
-final class GreetingApiLive implements GreetingApi {
+final class MemoryMessageSource implements MessageSource {
   @override
-  Future<String> fetchGreeting() async => 'Olá, better_effect';
+  Future<String> load() async => 'Olá, better_effect';
 }
 
-Effect<String, AppFailure> loadGreeting() =>
-    Effect.result((use) async {
-      final api = use<GreetingApi>();
-      return use.tryAsync(
-        api.fetchGreeting,
-        onError: (error, stack) => NetworkFailure(error.toString()),
-      );
-    });
+final module = Module([
+  .provide<MessageSource>(MemoryMessageSource.new),
+]);
+
+Effect<String, AppFailure> loadMessage() => Effect.result((use) async {
+  final source = use<MessageSource>();
+  return use.tryAsync(
+    source.load,
+    onError: (error, stackTrace) => LoadFailure(error),
+  );
+});
+
+Future<void> main() async {
+  final result = await module.run(loadMessage());
+  result.fold(print, print);
+}
 ```
 
-Construir o Effect não executa I/O. A operação começa somente quando um Runtime
-a executa.
+A chamada `loadMessage()` apenas cria a descrição. O I/O começa quando `Module.run` cria um Runtime e executa o Effect.
 
-## Componha coleções com um limite explícito
+## Effect e fronteiras de erro
+
+Dentro de `Effect.result`, o parâmetro `use` é um `EffectContext<E>` read-only. Ele pode resolver serviços, compor `Effect`/`ResultDart`, falhar com `use.fail`, ler locals e adquirir resources.
+
+```dart
+Effect<User, AppFailure> loadUser(String id) => Effect.result((use) async {
+  final users = use<UserRepository>();
+  final user = await use.unwrap(users.find(id));
+  return user;
+});
+```
+
+`use.unwrap` propaga uma falha tipada do Effect aninhado. `use.result` faz o mesmo para `ResultDart`.
+
+Escolha a fronteira de exception de forma deliberada:
+
+- `Effect.tryAsync` e `use.tryAsync` capturam `Exception`;
+- `Error` e outros objetos lançados permanecem defects;
+- `Effect.tryAll` captura qualquer objeto lançado e só deve ser usado quando isso é intencional;
+- `Effect.sync` é lazy, mas exceptions lançadas pelo callback continuam sendo defects.
+
+## Module, bindings e lifetimes
+
+`Module` é uma descrição imutável. Construir um Module não instancia serviços nem adquire resources.
+
+```dart
+final appModule = Module([
+  .instance(const AppConfig()),
+  .provide<HttpClient>(HttpClientLive.new),
+  .factory<CreateOrder>(CreateOrder.new),
+]);
+```
+
+Bindings disponíveis:
+
+| Binding | Lifetime |
+| --- | --- |
+| `.provide<T>(Constructor.new)` | `lazySingleton` por padrão |
+| `.factory<T>(Constructor.new)` | uma instância por resolução |
+| `.singleton<T>(Constructor.new)` | criada no startup |
+| `.lazySingleton<T>(Constructor.new)` | criada na primeira resolução |
+| `.instance<T>(value)` | valor já criado |
+| `.resource<T>(...)` | adquirido no startup e liberado no shutdown |
+
+`ServiceKey<T>` diferencia múltiplas implementações do mesmo contrato. Bindings com a mesma identidade de tipo + key são rejeitados.
+
+## Scope e resources
+
+Resources do `Module` pertencem ao Runtime. Resources de uma única execução pertencem ao Scope dessa execução:
+
+```dart
+final connection = await use.acquire(
+  Effect.tryAsync(
+    DatabaseConnection.open,
+    onError: DatabaseFailure.from,
+  ),
+  release: (connection, exit) => connection.close(),
+);
+```
+
+Child scopes fecham antes do pai. Finalizers são executados em ordem reversa de registro e o fechamento continua tentando os demais finalizers quando um release falha.
+
+## Runtime e ownership físico
+
+Para uma operação curta, prefira `module.run`/`runExit`. Para um processo de vida longa:
+
+```dart
+final runtime = await appModule.start();
+try {
+  await runtime.run(sync());
+} finally {
+  await runtime.close();
+}
+```
+
+`Runtime.run` devolve `ResultDart` e repropaga defects. `runExit` preserva o outcome completo em `Exit`.
+
+`Runtime.execute` cria um `EffectExecution` gerenciado. Interrupção é cooperativa: o caller pode receber `ExitInterrupted` antes do `Future` físico terminar, mas o Runtime continua possuindo o Scope e os resources até a conclusão real.
+
+Essa regra também vale para `Effect.timeout` e continua valendo quando o Effect é executado por um `EffectCommand` Flutter.
+
+## Coleções e concorrência
 
 ```dart
 final users = Effect.forEach(
@@ -67,28 +186,14 @@ final users = Effect.forEach(
 );
 ```
 
-O padrão é sequencial (`concurrency: 1`). O Runtime inicia os itens em ordem
-FIFO, nunca ultrapassa o limite informado e devolve uma lista não modificável na
-ordem da entrada, mesmo quando os Futures terminam fora de ordem.
+`all`/`forEach` são sequenciais por padrão. Com concorrência limitada, o scheduler inicia trabalho em FIFO, preserva a ordem da lista de saída e deixa de iniciar novos itens depois de falha, defect ou interruption. Trabalho já iniciado ainda é aguardado.
 
-Para uma coleção que já contém Effects:
+Use `allUnbounded`/`forEachUnbounded` somente quando fan-out sem limite for desejado explicitamente.
 
-```dart
-final dashboard = Effect.all(
-  [loadProfile(), loadNotifications(), loadPreferences()],
-  concurrency: 3,
-);
-```
-
-Fan-out sem limite precisa ser escolhido explicitamente com
-`Effect.forEachUnbounded` ou `Effect.allUnbounded`. Depois de falha, defect ou
-interrupção, nenhum item novo começa; os itens já iniciados continuam pertencendo
-à execução até a conclusão física.
-
-## Repita apenas falhas tipadas
+## Retry
 
 ```dart
-final resilient = loadGreeting().retry(
+final resilient = request().retry(
   RetryPolicy.exponential(
     maxAttempts: 4,
     initialDelay: const Duration(milliseconds: 200),
@@ -97,187 +202,78 @@ final resilient = loadGreeting().retry(
 );
 ```
 
-A execução inicial conta como tentativa um. Cada tentativa recebe um
-Scope filho, e seus resources fecham antes do delay ou da próxima
-tentativa. Defects não são repetidos. Delays e jitter usam
-`EffectClock` e `EffectRandom` registrados explicitamente; o Runtime não
-instala serviços globais.
+Retry considera apenas o canal de falha tipado. Cada tentativa recebe um child `Scope` novo, fechado antes de avaliar policy, dormir ou iniciar a próxima tentativa.
 
-## Module e Runtime
+Policies com delay resolvem `EffectClock`; jitter resolve `EffectRandom`. Nenhum dos dois é instalado implicitamente.
+
+O mesmo retry pode ser usado em um Effect chamado por `EffectCommand`: o Command coordena a intenção da UI; o retry continua sendo responsabilidade da operação.
+
+## Ambientes locais e child Runtimes
+
+`runWith`/`runExitWith` adicionam um `Module` somente a uma execução. `Runtime.fork` cria um ambiente de vida mais longa:
 
 ```dart
-final module = Module([
-  .provide<GreetingApi>(GreetingApiLive.new),
-]);
-
-final runtime = await module.start();
-
+final checkout = await runtime.fork(checkoutModule, label: 'checkout');
 try {
-  final result = await runtime.run(loadGreeting());
-  // Trate Success ou Failure.
+  await checkout.run(loadCheckout());
 } finally {
-  await runtime.close();
+  await checkout.close();
 }
 ```
 
-Para uma operação única, use `module.run(effect)` ou `module.runExit(effect)`.
-Essas APIs iniciam e fecham o Runtime automaticamente.
+O child resolve localmente primeiro e faz fallback para o pai. Fechar o child não fecha o pai; fechar o pai coordena os children antes dos resources do root.
 
-## Resources com owner explícito
+No Flutter, `BetterEffectFeatureScope` é o adapter que usa essa mesma capacidade para possuir um child Runtime durante a vida de um subtree.
 
-Um resource do Module vive durante o Runtime:
-
-```dart
-final module = Module([
-  .resource<ApiClient>(
-    acquire: (_) => ApiClient.connect(),
-    release: (client, exit) => client.close(),
-  ),
-]);
-```
-
-Um resource adquirido com `use.acquire` vive durante uma execução:
-
-```dart
-final file = await use.acquire(
-  Effect.tryAsync(
-    TemporaryFile.create,
-    onError: TemporaryFileFailure.from,
-  ),
-  release: (file, exit) => file.delete(),
-);
-```
-
-O callback de release recebe o `Exit` responsável pelo fechamento.
-
-## Contexto e resources por execução
-
-Use um Module local quando uma operação precisa de request context, tenant,
-transaction ou overrides temporários:
-
-```dart
-final requestModule = Module([
-  .instance<RequestContext>(requestContext),
-  .resource<Transaction>(
-    acquire: (services) {
-      return services<Database>().beginTransaction();
-    },
-    release: (transaction, exit) => transaction.close(exit),
-  ),
-]);
-
-final exit = await runtime.runExitWith(
-  requestModule,
-  handleRequest,
-  executionLabel: 'http.request',
-);
-```
-
-O ambiente local resolve seus próprios bindings primeiro e usa o Runtime raiz
-como fallback. Nada é registrado globalmente.
-
-## Child Runtimes para features
-
-Quando o lifetime precisa durar mais que uma execução, mas menos que a aplicação,
-crie um Runtime filho:
-
-```dart
-final checkoutRuntime = await runtime.fork(
-  checkoutModule,
-  label: 'checkout',
-);
-
-try {
-  await checkoutRuntime.run(loadCheckout);
-  await checkoutRuntime.run(validateCheckout);
-} finally {
-  await checkoutRuntime.close();
-}
-```
-
-Bindings do filho têm precedência e serviços ausentes usam o Runtime pai como
-fallback. Resources do Module da feature sobrevivem às duas execuções acima e
-fecham quando `checkoutRuntime` fecha.
-
-Fechar o filho nunca fecha o pai. Fechar o pai coordena seus filhos antes de
-liberar resources parentais. `runWith` dentro de um child Runtime cria uma camada
-ainda mais curta sem perder a cadeia de fallback.
-
-Consulte [Feature scopes](../guides/feature-scopes) para o equivalente Flutter.
-
-## Execuções gerenciadas
-
-```dart
-final execution = runtime.execute(
-  synchronizeOrders(),
-  label: 'orders.synchronize',
-);
-
-execution.interrupt(reason: 'screen-disposed');
-final exit = await execution.exit;
-```
-
-A interrupção é cooperativa. O `ExitInterrupted` pode ser publicado antes da
-conclusão física, mas o Runtime continua sendo owner do Scope e dos resources
-até o Future terminar.
+Backends customizados precisam implementar `ResolverBackendOverlayFactory` para suportar overlays. O backend padrão já suporta.
 
 ## Observabilidade
 
-```dart
-final runtime = await module.start(
-  observers: [AppObserver()],
-);
-```
+`RuntimeObserver` recebe eventos síncronos de execução, resolução de serviço, aquisição/release, interruption, retry e cleanup failure. Erros lançados pelo observer são isolados e não substituem o outcome do Effect.
 
-Observers podem acompanhar execuções, resolução de dependências, aquisição,
-release, interrupção e falhas de cleanup. As falhas do próprio observer são
-isoladas e não alteram o resultado dos Effects.
+`EffectLocal.metadata` projeta valores selecionados para `RuntimeEventContext.localMetadata`. Prefira valores imutáveis e seguros para diagnóstico.
 
-Em child Runtimes, `RuntimeEventContext` também identifica o Runtime owner, o
-Runtime pai e a label da feature por `runtimeId`, `parentRuntimeId` e
-`runtimeLabel`.
+Commands Flutter podem fornecer `debugLabel`; essa label é propagada para a execução gerenciada do Runtime e pode ser correlacionada com a observabilidade do core.
 
-Use `EffectLocal.metadata` para request IDs, trace IDs e outros campos seguros:
+## Testing
 
 ```dart
-const requestId = EffectLocal<String>.metadata(
-  'unknown',
-  name: 'request.id',
-);
-
-final program = loadUser.withLocals([
-  requestId.bind('req-123'),
-]);
+import 'package:better_effect/testing.dart';
 ```
 
-## Composição de produção, teste e preview
+A biblioteca de testing fornece `TestRuntime`, `ManualEffectClock`, `RecordingRuntimeObserver`, matchers/extractors de `Exit`, primitives determinísticas e o contrato para validar backends customizados.
 
-Modules são descrições imutáveis. O mesmo grafo pode receber overrides sem
-alterar a implementação:
+`package:better_effect_flutter/testing.dart` reexporta esses helpers e adiciona utilitários específicos para Commands e widget tests.
 
-```dart
-final production = Module([
-  .provide<Clock>(SystemClock.new),
-  .provide<UserRepository>(UserRepositoryLive.new),
-]);
+## Quando não usar
 
-final test = production.overrideWith([
-  .instance<Clock>(FakeClock.fixed(DateTime(2026, 1, 1))),
-  .instance<UserRepository>(FakeUserRepository()),
-]);
-```
+Não adicione `Effect` por obrigação a lógica pura que já é clara como função Dart. O package também não substitui state management, HTTP client, banco, roteamento ou um framework de aplicação.
 
-Esse padrão evita estado global e permite Runtimes concorrentes com ambientes
-diferentes.
+Se seu fluxo não precisa de falhas tipadas, DI contextual ou lifecycle de resources, `Future`/`ResultDart` diretamente podem ser a solução mais simples.
+
+## Limitações que afetam design
+
+- `Future` arbitrário não tem cancelamento físico geral;
+- timeout/interruption encerram a ownership lógica antes da física quando necessário;
+- defects não aparecem automaticamente no tipo `E`;
+- retry com tempo/jitter exige serviços explícitos;
+- overlays dependem da capacidade do backend de DI.
+
+## Versão e migração
+
+A release `0.4.0` adicionou child Runtimes, retry tipado, composição de coleções e o contrato normativo/conformance. Recursos de `0.3.0` incluem Modules por execução, observabilidade e a biblioteca pública de testing.
+
+Consulte o [`CHANGELOG`](https://github.com/nitoba/better-effect-dart/blob/main/packages/better_effect/CHANGELOG.md), o [contrato semântico](/docs/semantics) e o [ledger de migrações](https://github.com/nitoba/better-effect-dart/blob/main/docs/semantic-migrations.md) ao atualizar uma linha anterior.
 
 ## Próximos passos
 
-- [Efeitos e falhas tipadas](../guides/effects)
-- [Coleções e concorrência limitada](../guides/collection-composition)
-- [Retry determinístico](../guides/retry)
-- [Recursos e ciclo de vida](../guides/resources-and-lifetimes)
-- [Modules por execução](../guides/execution-scoped-modules)
-- [Feature scopes](../guides/feature-scopes)
-- [Observabilidade](../guides/observability)
-- [Testando Effects e Commands](../guides/testing)
-- [API do package no pub.dev](https://pub.dev/packages/better_effect)
+- [`better_effect_flutter`: mapa completo da integração](/docs/packages/better_effect_flutter)
+- [Flutter: integração completa](/docs/guides/flutter-mvvm)
+- [Efeitos e falhas tipadas](/docs/guides/effects)
+- [Coleções e concorrência](/docs/guides/collection-composition)
+- [Retry](/docs/guides/retry)
+- [Resources e ciclo de vida](/docs/guides/resources-and-lifetimes)
+- [Modules por execução](/docs/guides/execution-scoped-modules)
+- [Observabilidade](/docs/guides/observability)
+- [Testing](/docs/guides/testing)
+- [API no pub.dev](https://pub.dev/documentation/better_effect/latest/)

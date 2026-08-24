@@ -9,7 +9,8 @@
     "typecheck": "next typegen && tsc --noEmit",
     "types:check": "npm run typecheck",
     "lint": "eslint",
-    "check": "npm run typecheck && npm run lint && npm run build"
+    "links:check": "node scripts/check-internal-links.mjs",
+    "check": "npm run links:check && npm run typecheck && npm run lint && npm run build"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",

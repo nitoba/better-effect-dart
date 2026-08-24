@@ -1,71 +1,42 @@
 ---
 title: Sua primeira feature
-description: Construa uma leitura de pedidos com domínio, repository, Module e teste isolado
+description: Execute um fluxo completo com Effect, serviço, repository, Module e override de teste
 ---
 
-Este tutorial monta uma feature de ponta a ponta. O objetivo não é criar mais
-classes por hábito: é mostrar onde cada decisão mora quando uma operação tem
-I/O, uma falha que o produto conhece, uma implementação de produção e uma
-implementação de teste.
+O objetivo deste tutorial é chegar a um programa executável antes de introduzir detalhes avançados. A feature carrega pedidos, transforma exceptions de infraestrutura em uma falha de domínio e permite trocar a fonte de dados sem alterar a operação.
 
-Ao final, o fluxo será:
+Ao final, o fluxo é:
 
 ```text
-UI / job → loadOrders() → OrderRepository → OrdersApi → HTTP
-                  ↑             ↑               ↑
-                Effect        Module          implementação live/fake
+main/test
+   ↓
+loadOrders()
+   ↓
+OrderRepository
+   ↓
+OrdersApi
+   ↓
+Module escolhe a implementação
 ```
 
-## 1. Separe o código pela responsabilidade
+## 1. Crie um exemplo completo
 
-Uma organização pequena já comunica a arquitetura para quem entrar no projeto:
-
-<Files>
-  <Folder name="lib" defaultOpen>
-    <Folder name="domain" defaultOpen>
-      <File name="order.dart" />
-      <File name="order_failure.dart" />
-    </Folder>
-    <Folder name="data" defaultOpen>
-      <File name="orders_api.dart" />
-      <File name="order_repository.dart" />
-      <File name="order_repository_live.dart" />
-    </Folder>
-    <Folder name="config" defaultOpen>
-      <File name="app_module.dart" />
-    </Folder>
-  </Folder>
-  <Folder name="test">
-    <File name="order_repository_test.dart" />
-  </Folder>
-</Files>
-
-`domain` não sabe que existe HTTP. `data` traduz a infraestrutura para o
-contrato do domínio. `config` escolhe implementações. A UI ou um worker apenas
-executa a operação.
-
-## 2. Modele o resultado que o produto entende
-
-Não use uma exceção genérica para representar todos os motivos de a lista não
-estar disponível:
+Depois de instalar `better_effect`, coloque este código em `bin/main.dart` de um projeto Dart:
 
 ```dart
+import 'package:better_effect/better_effect.dart';
+
 sealed class OrderFailure implements Exception {
   const OrderFailure();
 }
 
-final class OrdersOffline extends OrderFailure {
-  const OrdersOffline(this.cause);
-  final Object cause;
-}
+final class OrdersUnavailable extends OrderFailure {
+  const OrdersUnavailable(this.cause);
 
-final class OrdersUnauthorized extends OrderFailure {
-  const OrdersUnauthorized();
-}
+  final Exception cause;
 
-final class OrdersInvalidResponse extends OrderFailure {
-  const OrdersInvalidResponse(this.message);
-  final String message;
+  @override
+  String toString() => 'OrdersUnavailable($cause)';
 }
 
 final class Order {
@@ -74,103 +45,183 @@ final class Order {
   final String id;
   final double total;
 }
-```
 
-Uma tela pode mostrar login quando recebe `OrdersUnauthorized`, oferecer retry
-para `OrdersOffline` e enviar `OrdersInvalidResponse` para observabilidade.
-Essa decisão fica possível porque a falha é parte do tipo da operação.
-
-## 3. Defina portas, não implemente detalhes no domínio
-
-O domínio precisa de uma capacidade pequena. A implementação live pode trocar
-HTTP por GraphQL sem mudar o contrato:
-
-```dart
 abstract interface class OrdersApi {
   Future<List<Order>> getOrders();
 }
 
-abstract interface class OrderRepository {
-  Effect<List<Order>, OrderFailure> loadOrders();
-}
-```
-
-## 4. Adapte a API em um Effect
-
-```dart
-final class OrderRepositoryLive implements OrderRepository {
-  const OrderRepositoryLive();
-
+final class DemoOrdersApi implements OrdersApi {
   @override
-  Effect<List<Order>, OrderFailure> loadOrders() =>
-      Effect.result((use) async {
-        final api = use<OrdersApi>();
-
-        return use.unwrap(
-          Effect.tryAsync(
-            api.getOrders,
-            onError: (error, stack) => OrdersOffline(error),
-          ),
-        );
-      });
+  Future<List<Order>> getOrders() async {
+    return const [
+      Order(id: 'ord-1', total: 42),
+      Order(id: 'ord-2', total: 18),
+    ];
+  }
 }
 
-Effect<List<Order>, OrderFailure> loadOrders() =>
-    Effect.result((use) async {
-      final repository = use<OrderRepository>();
-      return use.unwrap(repository.loadOrders());
-    });
-```
+abstract interface class OrderRepository {
+  Effect<List<Order>, OrderFailure> load();
+}
 
-O `Effect` é lazy: chamar `loadOrders()` descreve a operação, mas não abre a
-rede. O I/O só acontece quando um `Runtime` executa a descrição. Isso permite
-que a mesma feature seja montada em produção, preview e teste.
+final class OrderRepositoryLive implements OrderRepository {
+  @override
+  Effect<List<Order>, OrderFailure> load() => Effect.result((use) async {
+    final api = use<OrdersApi>();
 
-Se o seu repository já for a fronteira pública da feature, uma função factory
-também pode resolver o serviço diretamente:
+    return use.tryAsync(
+      api.getOrders,
+      onError: (error, stackTrace) => OrdersUnavailable(error),
+    );
+  });
+}
 
-```dart
-Effect<List<Order>, OrderFailure> loadOrders() => Effect.result((use) async {
-  final repository = use<OrderRepository>();
-  return use.unwrap(repository.loadOrders());
-});
-```
-
-Escolha uma forma e mantenha a direção: o domínio pede uma porta; o Module
-fornece uma implementação.
-
-## 5. Componha o Module no composition root
-
-```dart
 final appModule = Module([
-  .provide<OrdersApi>(OrdersApiHttp.new),
+  .provide<OrdersApi>(DemoOrdersApi.new),
   .provide<OrderRepository>(OrderRepositoryLive.new),
 ]);
-```
 
-O tipo explícito em `.provide<T>` é importante. Ele documenta o contrato que
-os consumidores podem resolver e permite ao analyzer verificar a composição.
-O default `lazySingleton` evita criar clients que a execução não usa; escolha
-`.singleton` quando a inicialização precisa acontecer no startup ou
-`.factory` quando cada resolução deve ser independente.
+Effect<List<Order>, OrderFailure> loadOrders() => Effect.result((use) async {
+  final repository = use<OrderRepository>();
+  return use.unwrap(repository.load());
+});
 
-## 6. Execute uma vez ou mantenha um Runtime
-
-Para um comando ou script de curta duração, `Module.run` inicia e fecha os
-recursos automaticamente:
-
-```dart
 Future<void> main() async {
   final result = await appModule.run(loadOrders());
 
   result.fold(
-    (orders) => print('Pedidos: ${orders.length}'),
+    (orders) => print('Pedidos carregados: ${orders.length}'),
     (failure) => print('Falha: $failure'),
   );
 }
 ```
 
-Em uma aplicação, mantenha um Runtime durante a vida do owner:
+Execute:
+
+```bash
+dart run bin/main.dart
+```
+
+Saída esperada:
+
+```text
+Pedidos carregados: 2
+```
+
+A chamada `loadOrders()` não executa a API. Ela cria um `Effect`. `appModule.run(...)` cria o Runtime, executa o Effect e fecha o Runtime quando a operação termina.
+
+## 2. Entenda onde cada decisão ficou
+
+`OrdersApi` representa a fronteira que pode falar HTTP, GraphQL, banco ou outra fonte. O exemplo usa `DemoOrdersApi` para continuar executável sem exigir uma biblioteca HTTP externa.
+
+`OrderRepositoryLive` traduz a exception da API para `OrdersUnavailable`, que faz parte do contrato de `OrderFailure`. `use.tryAsync` captura `Exception`; `Error` e outros defects inesperados não são convertidos silenciosamente em falha de domínio.
+
+`loadOrders()` resolve o repository somente quando o Effect está rodando. A operação não conhece `DemoOrdersApi` nem o container usado pelo Runtime.
+
+`appModule` é o composition root: é ali que o contrato `OrdersApi` recebe uma implementação concreta.
+
+## 3. Substitua a demo por I/O real no boundary
+
+Em produção, `OrdersApi` pode encapsular `package:http`, Dio, gRPC ou outro client. Essa dependência externa pertence à implementação do adapter; o restante da feature pode manter os mesmos contratos:
+
+```dart
+final class HttpOrdersApi implements OrdersApi {
+  HttpOrdersApi(this._client);
+
+  final OrdersHttpClient _client;
+
+  @override
+  Future<List<Order>> getOrders() async {
+    final response = await _client.get('/orders');
+    return decodeOrders(response);
+  }
+}
+```
+
+O trecho acima é **pseudocódigo de integração**: `OrdersHttpClient` e `decodeOrders` representam o client/decoder escolhidos pela aplicação e não fazem parte de `better_effect`.
+
+A composição de produção poderia registrar:
+
+```dart
+final productionModule = Module([
+  .provide<OrdersHttpClient>(OrdersHttpClientLive.new),
+  .provide<OrdersApi>(HttpOrdersApi.new),
+  .provide<OrderRepository>(OrderRepositoryLive.new),
+]);
+```
+
+Constructor injection funciona bem para dependências estruturais como o client usado por um adapter. `use<T>()` continua útil para dependências contextuais no ponto em que a operação precisa delas.
+
+## 4. Separe arquivos quando a feature crescer
+
+O exemplo cabe em um arquivo para facilitar o primeiro resultado. Em uma aplicação real, uma organização pequena pode ser suficiente:
+
+<Files>
+  <Folder name="lib" defaultOpen>
+    <Folder name="orders" defaultOpen>
+      <Folder name="domain" defaultOpen>
+        <File name="order.dart" />
+        <File name="order_failure.dart" />
+      </Folder>
+      <Folder name="data" defaultOpen>
+        <File name="orders_api.dart" />
+        <File name="order_repository.dart" />
+        <File name="order_repository_live.dart" />
+      </Folder>
+      <File name="orders_module.dart" />
+      <File name="load_orders.dart" />
+    </Folder>
+  </Folder>
+</Files>
+
+Essa árvore é uma sugestão, não uma exigência do package. O objetivo é preservar responsabilidades: domínio não precisa conhecer HTTP, adapters traduzem infraestrutura e o Module escolhe implementações.
+
+## 5. Troque a folha no teste
+
+O mesmo `Effect` pode rodar com outra implementação sem estado global. Adicione `test` como `dev_dependency` se o projeto ainda não usa o package:
+
+```bash
+dart pub add --dev test
+```
+
+Em `test/load_orders_test.dart`, importe o arquivo usado pelo primeiro exemplo:
+
+```dart
+import '../bin/main.dart';
+import 'package:test/test.dart';
+
+final class FakeOrdersApi implements OrdersApi {
+  const FakeOrdersApi(this.orders);
+
+  final List<Order> orders;
+
+  @override
+  Future<List<Order>> getOrders() async => orders;
+}
+
+test('carrega pedidos usando um override local', () async {
+  final module = appModule.overrideWith([
+    .instance<OrdersApi>(
+      const FakeOrdersApi([
+        Order(id: 'ord-test', total: 99),
+      ]),
+    ),
+  ]);
+
+  final result = await module.run(loadOrders());
+
+  expect(result.isSuccess(), isTrue);
+  expect(result.getOrThrow().single.id, 'ord-test');
+});
+```
+
+Para código de produção, mova as APIs reutilizáveis para `lib/` e prefira um import `package:`. O import relativo acima existe apenas para manter o primeiro tutorial executável sem exigir que o leitor escolha antecipadamente o nome do próprio package.
+
+O teste mantém `OrderRepositoryLive` e `loadOrders()`. Apenas a folha que representa I/O foi substituída.
+
+## 6. Mantenha um Runtime quando houver um owner de vida longa
+
+`Module.run` é ideal para uma operação curta porque cuida do Runtime automaticamente. Workers, servidores e outras aplicações com múltiplas execuções normalmente criam um Runtime uma vez:
 
 ```dart
 Future<void> runWorker() async {
@@ -185,58 +236,32 @@ Future<void> runWorker() async {
 }
 ```
 
-O `finally` não é detalhe cosmético: é onde o owner devolve conexões,
-subscriptions e clients que pertencem ao Runtime. No Flutter, o owner costuma
-ser `BetterEffectProvider` ou `BetterEffectBootstrap`.
+`syncOrders()` representa outra operação da aplicação. O ponto importante é o `finally`: o boundary que criou o Runtime é responsável por fechá-lo.
 
-## 7. Troque somente a implementação no teste
+No Flutter, esse ownership normalmente é coordenado por `runBetterEffectApp`, `BetterEffectBootstrap`, `BetterEffectProvider` ou `BetterEffectFeatureScope` em vez de um `try/finally` dentro da View.
 
-```dart
-import 'package:test/test.dart';
+## 7. Leve a operação para Flutter quando necessário
 
-final class FakeOrdersApi implements OrdersApi {
-  const FakeOrdersApi(this.value);
-  final List<Order> value;
+A operação `loadOrders()` pode continuar no core Dart. No Flutter, um `EffectCommand` executa o mesmo Effect e projeta o `Exit` em estado observável:
 
-  @override
-  Future<List<Order>> getOrders() async => value;
-}
-
-test('carrega pedidos sem rede', () async {
-  final module = appModule.overrideWith([
-    .instance<OrdersApi>(
-      FakeOrdersApi([const Order(id: 'ord-1', total: 42)]),
-    ),
-  ]);
-
-  final result = await module.run(loadOrders());
-
-  expect(result.getOrNull()?.single.id, 'ord-1');
-});
+```text
+Effect<List<Order>, OrderFailure>
+                 ↓
+EffectCommand
+                 ↓
+Idle / Running / Success / Failure / Defect / Interrupted
 ```
 
-O teste usa o mesmo `Effect`, o mesmo repository e a mesma composição; só a
-folha que fala com a rede foi substituída. Não há singleton global para
-resetar, `sleep` para esperar callback ou endpoint de staging para manter vivo.
+O guia de [Flutter MVVM](../guides/flutter-mvvm) mostra como criar o Command, escolher a policy de chamadas repetidas e separar renderização de efeitos one-shot.
 
-## 8. Leve a operação para o Flutter quando fizer sentido
+## O que este tutorial garantiu
 
-A tela não precisa conhecer `OrdersApi` nem criar `Runtime`. O guia de
-[Flutter MVVM](../guides/flutter-mvvm) mostra como transformar `loadOrders()` em
-um `EffectCommand`, escolher `drop`, `latest` ou `queue` e renderizar loading,
-sucesso, falha e defeito sem callbacks espalhados.
+- o exemplo inicial usa somente APIs públicas da linha `0.4.x`;
+- o primeiro bloco é executável sem dependência HTTP externa;
+- o trecho de integração HTTP está explicitamente marcado como pseudocódigo;
+- a falha de domínio é diferente de um defect;
+- o `Module` escolhe implementações sem expor um injector global à operação;
+- o teste troca um binding sem alterar o Effect;
+- o Runtime tem um owner responsável pelo fechamento.
 
-## O que você construiu
-
-| Peça | Responsabilidade |
-| --- | --- |
-| `OrderFailure` | Contrato de falhas esperadas |
-| `OrderRepository` | Porta usada pelo domínio |
-| `OrderRepositoryLive` | Adaptação de I/O para `Effect` |
-| `appModule` | Composição das implementações |
-| `Runtime` | Execução e ownership de recursos |
-| `overrideWith` | Teste/preview sem alterar produção |
-
-Esse é o menor fluxo que demonstra o poder real do package: a feature tem
-semântica de erro, dependências substituíveis e ciclo de vida explícito sem
-exigir uma camada mágica entre o Dart que você já escreve e o runtime.
+Agora avance para [Effects e falhas tipadas](../guides/effects) ou [recursos e ciclo de vida](../guides/resources-and-lifetimes).
