@@ -119,7 +119,7 @@ Use `EffectCommandBuilder` para UI derivada do estado:
 ```dart
 EffectCommandBuilder<List<String>, TaskFailure>(
   command: viewModel.load,
-  builder: (context, state) => switch (state) {
+  builder: (context, state, child) => switch (state) {
     EffectCommandIdle() => const Text('Pronto'),
     EffectCommandRunning() => const CircularProgressIndicator(),
     EffectCommandSuccess(:final value) => Text('${value.length} tarefas'),
@@ -203,7 +203,7 @@ BetterEffectFeatureScope(
 
 ## Acesso pelo BuildContext
 
-`context.effectCommands` é um read não-listening pensado para factories. `watchEffectCommands()` reage à substituição do scope e é usado por lifecycle adapters.
+`context.effectCommands` é um read non-listening pensado para factories. `watchEffectCommands()` reage à substituição do scope e é usado por lifecycle adapters.
 
 `context.effectRuntime` e `readEffectService<T>()` são úteis em integration/composition boundaries. Para lógica de negócio dentro de widgets, prefira o ViewModel e deixe o Effect resolver repositories/services.
 
