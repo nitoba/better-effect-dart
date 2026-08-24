@@ -34,18 +34,15 @@ dependencies:
   better_effect_flutter: ^0.4.0
 ```
 
-O package reexporta `better_effect`, portanto a maioria das aplicações precisa de um único import:
+O package reexporta `better_effect`, portanto a maioria das aplicações precisa de um único import para as APIs da família.
+
+## Primeiro exemplo funcional
+
+Coloque este exemplo em `lib/main.dart`. Ele cria o Runtime da aplicação, resolve um serviço dentro de um `Effect`, executa a operação com um `EffectCommand` e renderiza o estado tipado.
 
 ```dart
 import 'package:better_effect_flutter/better_effect_flutter.dart';
-```
-
-## Primeiro fluxo funcional
-
-### 1. Declare a operação e o Module
-
-```dart
-import 'package:better_effect_flutter/better_effect_flutter.dart';
+import 'package:flutter/material.dart';
 
 sealed class GreetingFailure implements Exception {
   const GreetingFailure();
@@ -72,54 +69,77 @@ final appModule = Module([
 Effect<String, GreetingFailure> greeting(String name) =>
     Effect.result((use) async {
       final service = use<GreetingService>();
+
       return use.tryAsync(
         () => service.greet(name),
         onError: (error, stackTrace) => GreetingUnavailable(error),
       );
     });
-```
 
-### 2. Inicie o Runtime no boundary da aplicação
-
-```dart
-Future<void> main() {
-  return runBetterEffectApp(
-    module: appModule,
-    app: const GreetingApp(),
-  );
-}
-```
-
-`runBetterEffectApp` inicia um Runtime de aplicação e publica `BetterEffectScope` na árvore. Para startup declarativo com loading/error/retry, use `BetterEffectBootstrap`. Quando outro boundary já possui o Runtime, use `BetterEffectProvider.value`.
-
-### 3. Crie um ViewModel com Command
-
-```dart
 final class GreetingViewModel extends EffectViewModel {
   GreetingViewModel(super.commands) {
-    greet = commandWithInput<String, String, GreetingFailure>(
-      greeting,
+    greet = command<String, GreetingFailure>(
+      () => greeting('Flutter'),
       keepPreviousData: false,
       debugLabel: 'GreetingViewModel.greet',
     );
   }
 
-  late final EffectCommand<String, String, GreetingFailure> greet;
+  late final EffectCommand0<String, GreetingFailure> greet;
+}
+
+final class GreetingPage extends StatelessWidget {
+  const GreetingPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return EffectViewModelBuilder<GreetingViewModel>(
+      create: (_, commands) => GreetingViewModel(commands),
+      builder: (context, viewModel, child) {
+        return Scaffold(
+          appBar: AppBar(title: const Text('better_effect_flutter')),
+          body: Center(
+            child: EffectCommandBuilder<String, GreetingFailure>(
+              command: viewModel.greet,
+              builder: (context, state, child) => switch (state) {
+                EffectCommandIdle() => const Text('Toque para executar'),
+                EffectCommandRunning() =>
+                  const CircularProgressIndicator(),
+                EffectCommandSuccess(:final value) => Text(value),
+                EffectCommandFailure() =>
+                  const Text('Falha esperada'),
+                EffectCommandDefect(:final defect) =>
+                  Text('Defect: $defect'),
+                EffectCommandInterrupted() =>
+                  const Text('Execução interrompida'),
+              },
+            ),
+          ),
+          floatingActionButton: FloatingActionButton(
+            onPressed: () {
+              viewModel.greet.execute();
+            },
+            child: const Icon(Icons.play_arrow),
+          ),
+        );
+      },
+    );
+  }
+}
+
+Future<void> main() {
+  return runBetterEffectApp(
+    module: appModule,
+    app: const MaterialApp(home: GreetingPage()),
+  );
 }
 ```
 
-`EffectViewModel` é opcional. Se a aplicação já possui uma classe base de ViewModel, use o mixin `EffectCommandOwner` para possuir e descartar Commands automaticamente.
+Execute com `flutter run`. Antes do toque, a tela está em `EffectCommandIdle`; durante a operação, em `EffectCommandRunning`; ao concluir, renderiza `Olá, Flutter!` a partir de `EffectCommandSuccess`.
 
-### 4. Construa o ViewModel no boundary Flutter
+`runBetterEffectApp` inicia um Runtime de aplicação e publica `BetterEffectScope` na árvore. Para startup declarativo com loading/error/retry, use `BetterEffectBootstrap`. Quando outro boundary já possui o Runtime, use `BetterEffectProvider.value`.
 
-```dart
-EffectViewModelBuilder<GreetingViewModel>(
-  create: (_, commands) => GreetingViewModel(commands),
-  builder: (_, viewModel, _) => GreetingView(viewModel: viewModel),
-)
-```
-
-Adapters de Provider/Riverpod/BLoC podem obter a factory scoped com `context.effectCommands`. `context.effectRuntime` e `readEffectService` existem para boundaries de integração; widgets de negócio normalmente devem conversar com o ViewModel.
+`EffectViewModel` é opcional. Se a aplicação já possui uma classe base de ViewModel, use o mixin `EffectCommandOwner` para possuir e descartar Commands automaticamente. Adapters de Provider/Riverpod/BLoC podem obter a factory scoped com `context.effectCommands`.
 
 ## O estado de um Command
 
@@ -134,21 +154,6 @@ Adapters de Provider/Riverpod/BLoC podem obter a factory scoped com `context.eff
 | `EffectCommandDefect` | Houve um evento inesperado fora do canal tipado. |
 | `EffectCommandInterrupted` | O Command deixou de possuir o resultado da execução. |
 
-A View pode usar pattern matching exaustivo:
-
-```dart
-Widget render(EffectCommandState<String, GreetingFailure> state) {
-  return switch (state) {
-    EffectCommandIdle() => const Text('Informe um nome'),
-    EffectCommandRunning() => const CircularProgressIndicator(),
-    EffectCommandSuccess(:final value) => Text(value),
-    EffectCommandFailure() => const Text('Não foi possível carregar'),
-    EffectCommandDefect(:final defect) => Text('Erro inesperado: $defect'),
-    EffectCommandInterrupted() => const Text('Operação interrompida'),
-  };
-}
-```
-
 `execute()` retorna `Future<Exit<A, E>>`, então código imperativo também pode aguardar o mesmo trabalho sem duplicar estado.
 
 ## Renderização e efeitos one-shot
@@ -161,7 +166,7 @@ O listener consome cada `revision` uma vez e despacha callbacks após o frame. N
 
 ## Políticas de execução
 
-Novos códigos devem preferir `CommandPolicy`:
+Para código novo que precisa de coordenação além do default, prefira `CommandPolicy`:
 
 ```dart
 search = commandWithInput<String, List<User>, SearchFailure>(
@@ -190,6 +195,8 @@ As três coordenações são:
 `command.cancel()` interrompe a ownership lógica do Command e pode limpar callers enfileirados/trigger-delayed. Isso **não** significa que o `Future` subjacente foi fisicamente cancelado.
 
 O `Runtime` mantém a execução e seus recursos até o trabalho físico terminar. Essa diferença também vale para `latest(cancelPrevious: true)`, dispose e timeout.
+
+Quando uma API externa oferece cancelamento, conecte-a ao `use.cancellation` dentro do `Effect` ou cruze um boundary cooperativo com `use.cancellation.throwIfCancelled()`.
 
 ## Runtime e lifecycle no Flutter
 
@@ -230,7 +237,9 @@ Importe a biblioteca dedicada quando precisar de harnesses de widget/Command:
 import 'package:better_effect_flutter/testing.dart';
 ```
 
-O package também inclui uma aplicação executável em `example/` e testes para lifecycle, policies, one-shot listeners, selectors e ownership de Runtime.
+Ela reexporta os helpers de testing do core e adiciona probes de estado/listener/policy e `BetterEffectTestApp`.
+
+O repositório também inclui uma aplicação em `example/` e testes para lifecycle, policies, one-shot listeners, selectors e ownership de Runtime.
 
 ## Limitações importantes
 
