@@ -1,15 +1,34 @@
 ---
 title: Packages
-description: Escolha o package certo para cada camada da sua aplicação
+description: Responsabilidade, dependências e escolha entre os três packages publicados
 ---
 
-Os três packages têm responsabilidades diferentes e versões independentes.
-Comece pelo core quando a lógica não precisa de Flutter; adicione a integração
-Flutter na borda de apresentação e mantenha o analyzer como tooling de
-desenvolvimento.
+O repositório contém três packages publicados e um package interno de conformance. A linha documentada é `0.4.x`.
+
+| Package | Responsabilidade | Depende de | Use em |
+| --- | --- | --- | --- |
+| `better_effect` | Effect, DI, Module, Runtime, Scope, recursos, retry e concorrência | `result_dart`, `auto_injector` | Dart e camadas compartilhadas |
+| `better_effect_flutter` | Commands, state, widgets e lifecycle Flutter | `better_effect`, Flutter | borda de apresentação |
+| `better_effect_analyzer` | plugin, lints, graph checker, CLI e API de grafo | tooling do analyzer | desenvolvimento e CI |
+
+`better_effect_conformance` não é um quarto package de uso da aplicação. Ele é uma suíte interna que executa o contrato de `SEMANTICS.md` para impedir regressões nas garantias estáveis de lifecycle e outcomes.
 
 <Cards>
-  <Card title="better_effect" href="/docs/packages/better_effect" description="Runtime Dart com Effects, Modules, recursos, scopes e falhas tipadas." />
-  <Card title="better_effect_flutter" href="/docs/packages/better_effect_flutter" description="Commands, ViewModels, bootstrap e widgets para projetar o Runtime na UI." />
-  <Card title="better_effect_analyzer" href="/docs/packages/better_effect_analyzer" description="Plugin do Analysis Server e CLI para verificar código e grafo de Modules." />
+  <Card title="better_effect" href="/docs/packages/better_effect" description="Comece aqui para código Dart: Effects, dependências contextuais e ownership de recursos." />
+  <Card title="better_effect_flutter" href="/docs/packages/better_effect_flutter" description="Use na UI quando Effects precisam virar Commands e estado observável." />
+  <Card title="better_effect_analyzer" href="/docs/packages/better_effect_analyzer" description="Adicione como tooling para encontrar erros locais e validar o grafo completo." />
 </Cards>
+
+## Como escolher
+
+Em uma app Flutter, normalmente instale somente `better_effect_flutter` em `dependencies`: ele já traz e reexporta o core. Adicione `better_effect_analyzer` separadamente como tooling quando quiser diagnósticos/CI.
+
+Em um package Dart compartilhado, use somente `better_effect`. Isso evita acoplar domínio ou infraestrutura ao Flutter.
+
+O analyzer não é requisito do Runtime. Desabilitá-lo não muda a semântica da aplicação; ele existe para detectar problemas antes da execução.
+
+## Versões
+
+Os packages são versionados e publicados de forma independente. Na release coordenada `0.4.0`, o Flutter depende de `better_effect ^0.4.0`; o analyzer permanece uma ferramenta independente.
+
+Confirme sempre a versão realmente resolvida no seu projeto antes de aplicar APIs vistas na documentação da linha atual.
