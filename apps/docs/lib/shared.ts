@@ -4,21 +4,26 @@ export const appDescription =
 export const appKeywords = [
   'Dart',
   'Flutter',
+  'result_dart',
+  'better_effect',
+  'better_effect_flutter',
   'dependency injection',
-  'MVVM',
+  'typed errors',
   'typed effects',
+  'MVVM',
+  'resource management',
+  'runtime',
   'pub.dev',
 ];
 const configuredSiteUrl =
   process.env.NEXT_PUBLIC_SITE_URL ??
   (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
 export const siteUrl = new URL(configuredSiteUrl);
-export const socialImagePath = '/og/docs/image.png';
+export const socialImagePath = '/opengraph-image';
 export const docsRoute = '/docs';
 export const docsImageRoute = '/og/docs';
 export const docsContentRoute = '/llms.mdx/docs';
 
-// fill this with your actual GitHub info, for example:
 export const gitConfig = {
   user: 'nitoba',
   repo: 'better-effect-dart',

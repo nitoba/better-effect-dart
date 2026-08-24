@@ -7,7 +7,14 @@ export function baseOptions(): BaseLayoutProps {
     nav: {
       title: (
         <span className="be-nav-brand">
-          <Image src="/logo.svg" alt="" width={24} height={24} className="be-nav-logo" />
+          <Image
+            src="/logo.png"
+            alt=""
+            width={24}
+            height={24}
+            className="be-nav-logo"
+            style={{ filter: 'none' }}
+          />
           <span>{appName}</span>
         </span>
       ),
