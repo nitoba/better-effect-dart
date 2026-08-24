@@ -59,6 +59,18 @@ jobs:
         working-directory: packages/better_effect_flutter
         run: flutter test
 
+      - name: Validate the example with hosted packages
+        run: |
+          example_dir="$(mktemp -d)"
+          cp -R packages/better_effect_flutter/example/. "$example_dir"
+          rm -f "$example_dir/pubspec.lock" "$example_dir/pubspec_overrides.yaml"
+          (
+            cd "$example_dir"
+            flutter pub get
+            flutter analyze --fatal-infos
+            flutter test
+          )
+
       - name: Use repository packages in the example
         working-directory: packages/better_effect_flutter/example
         run: |
