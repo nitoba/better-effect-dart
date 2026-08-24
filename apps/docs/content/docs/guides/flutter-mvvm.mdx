@@ -1,5 +1,5 @@
 ---
-title: Flutter: integração completa
+title: "Flutter: integração completa"
 description: Do Effect Dart ao widget, com Runtime, Commands, ViewModels e todos os boundaries Flutter
 ---
 
@@ -43,7 +43,7 @@ Widget
 
 O ponto central é: **o Command não substitui o Effect**. Ele executa o mesmo Effect que poderia ser usado em Dart puro, em testes, em um worker ou diretamente por `Runtime.run`.
 
-# 1. Comece pelo domínio Dart
+## 1. Comece pelo domínio Dart
 
 Considere um login. Nada nesta parte conhece Flutter:
 
@@ -81,7 +81,7 @@ Effect<Session, AuthFailure> signIn(
 
 O `Effect` pode usar `retry`, `Effect.forEach`, `runWith`, resources ou qualquer outra API do core. Ao chegar no Flutter, nenhuma dessas capacidades é perdida.
 
-# 2. Componha o Module normalmente
+## 2. Componha o Module normalmente
 
 ```dart
 final appModule = Module([
@@ -91,11 +91,11 @@ final appModule = Module([
 
 O Module continua sendo o composition root das dependências. Flutter não cria um segundo container.
 
-# 3. Coloque o Runtime na árvore
+## 3. Coloque o Runtime na árvore
 
 Há quatro formas principais de estabelecer o Runtime Flutter. A escolha depende de **quem cria** e **quem possui** esse Runtime.
 
-## Aplicação inteira: `runBetterEffectApp`
+### Aplicação inteira: `runBetterEffectApp`
 
 ```dart
 Future<void> main() {
@@ -108,7 +108,7 @@ Future<void> main() {
 
 É o caminho mais curto quando a app possui o Runtime raiz.
 
-## Startup como estado visual: `BetterEffectBootstrap`
+### Startup como estado visual: `BetterEffectBootstrap`
 
 ```dart
 BetterEffectBootstrap(
@@ -126,7 +126,7 @@ BetterEffectBootstrap(
 
 Prefira quando startup, retry e restart do Runtime fazem parte da UI. `restartKey` permite substituir intencionalmente o ambiente; `minimumLoadingDuration` pode manter uma tela de loading por uma duração mínima quando ela é usada.
 
-## Runtime já criado e owned pelo widget: `BetterEffectProvider`
+### Runtime já criado e owned pelo widget: `BetterEffectProvider`
 
 ```dart
 BetterEffectProvider(
@@ -137,7 +137,7 @@ BetterEffectProvider(
 )
 ```
 
-## Runtime owned por outro boundary: `BetterEffectProvider.value`
+### Runtime owned por outro boundary: `BetterEffectProvider.value`
 
 ```dart
 BetterEffectProvider.value(
@@ -150,7 +150,7 @@ Essa variante nunca fecha o Runtime. O owner externo continua responsável pelo 
 
 Todas essas opções terminam publicando um `BetterEffectScope` com o `Runtime` e um `EffectCommands` ligados a ele.
 
-# 4. Entenda `BetterEffectScope`
+## 4. Entenda `BetterEffectScope`
 
 `BetterEffectScope` é o `InheritedWidget` de infraestrutura da integração:
 
@@ -170,7 +170,7 @@ final commands = scope.commands;
 
 A extension de `BuildContext` oferece aliases mais ergonômicos, que veremos depois.
 
-# 5. Crie o Command que representa a intenção da UI
+## 5. Crie o Command que representa a intenção da UI
 
 Um ViewModel pode receber `EffectCommands` e criar Commands sem receber Runtime, Module ou repository:
 
@@ -201,9 +201,9 @@ final login = commands.withInput<LoginInput, Session, AuthFailure>(
 
 Ou um ViewModel com outra classe base pode usar `EffectCommandOwner` para registrar Commands owned.
 
-# 6. Crie o ViewModel no boundary certo
+## 6. Crie o ViewModel no boundary certo
 
-## `EffectViewModelBuilder`
+### `EffectViewModelBuilder`
 
 ```dart
 EffectViewModelBuilder<LoginViewModel>(
@@ -232,7 +232,7 @@ Se Provider, Riverpod, BLoC ou outro framework já cria seus ViewModels, use sim
 final viewModel = LoginViewModel(context.effectCommands);
 ```
 
-# 7. O Command produz uma união de estados
+## 7. O Command produz uma união de estados
 
 ```text
 EffectCommandIdle
@@ -271,11 +271,11 @@ final exit = await viewModel.login.execute((
 ));
 ```
 
-# 8. Escolha o widget de UI pelo tipo de reação
+## 8. Escolha o widget de UI pelo tipo de reação
 
 A biblioteca oferece quatro widgets de Command. Eles não são alternativas aleatórias; cada um atende uma responsabilidade diferente.
 
-## Só renderizar: `EffectCommandBuilder`
+### Só renderizar: `EffectCommandBuilder`
 
 ```dart
 EffectCommandBuilder<Session, AuthFailure>(
@@ -297,7 +297,7 @@ buildWhen: (previous, current) =>
     previous.isRunning != current.isRunning,
 ```
 
-## Só side effect one-shot: `EffectCommandListener`
+### Só side effect one-shot: `EffectCommandListener`
 
 ```dart
 EffectCommandListener<Session, AuthFailure>(
@@ -321,7 +321,7 @@ EffectCommandListener<Session, AuthFailure>(
 
 `listenWhen` filtra transições. `fireImmediately` pode entregar o estado presente no mount. O dispatch é post-frame e cada `revision` é consumida uma vez.
 
-## Render + side effect: `EffectCommandConsumer`
+### Render + side effect: `EffectCommandConsumer`
 
 ```dart
 EffectCommandConsumer<Session, AuthFailure>(
@@ -342,7 +342,7 @@ EffectCommandConsumer<Session, AuthFailure>(
 
 Internamente ele combina Listener e Builder. `listenWhen` e `buildWhen` são independentes.
 
-## Só uma projeção: `EffectCommandSelector`
+### Só uma projeção: `EffectCommandSelector`
 
 ```dart
 EffectCommandSelector<Session, AuthFailure, bool>(
@@ -356,7 +356,7 @@ EffectCommandSelector<Session, AuthFailure, bool>(
 
 Use `equals` quando `==` não for a igualdade adequada.
 
-### `EffectCommandSelector.snapshot`
+#### `EffectCommandSelector.snapshot`
 
 Fila, pending e triggers podem mudar sem criar uma revisão visual. Para isso existe o snapshot:
 
@@ -376,7 +376,7 @@ EffectCommandSelector.snapshot(
 
 `EffectCommandSnapshot` também contém `state`, `lastExit` e `policy`.
 
-# 9. `EffectCommandConsumer` não é obrigatório
+## 9. `EffectCommandConsumer` não é obrigatório
 
 Uma tela pode combinar os widgets conforme o desenho da UI:
 
@@ -402,9 +402,9 @@ EffectCommandListener<Session, AuthFailure>(
 
 Essa composição é intencional: listener, render e selector têm ciclos diferentes.
 
-# 10. Escolha uma policy pelo significado da interação
+## 10. Escolha uma policy pelo significado da interação
 
-## Submit/refresh: `drop`
+### Submit/refresh: `drop`
 
 ```dart
 submit = commandWithInput(
@@ -415,7 +415,7 @@ submit = commandWithInput(
 
 Uma chamada concorrente não inicia duplicata.
 
-## Busca: `latest`
+### Busca: `latest`
 
 ```dart
 search = commandWithInput(
@@ -428,7 +428,7 @@ search = commandWithInput(
 
 A chamada mais nova controla o estado visível. `cancelPrevious: true` solicita interrupção cooperativa do trabalho anterior.
 
-## Escritas ordenadas: `queue`
+### Escritas ordenadas: `queue`
 
 ```dart
 sync = commandWithInput(
@@ -442,7 +442,7 @@ sync = commandWithInput(
 
 Callers aceitos são processados em FIFO.
 
-## Debounce/throttle
+### Debounce/throttle
 
 ```dart
 search = commandWithInput(
@@ -466,7 +466,7 @@ final module = Module([
 
 Veja [Políticas de Command](./command-policies) para leading/trailing, overflow, caller outcomes e retry input.
 
-# 11. Cancelamento continua sendo uma semântica do core
+## 11. Cancelamento continua sendo uma semântica do core
 
 `viewModel.login.cancel()` publica interruption para o caller/Command, mas não força a interrupção física de qualquer `Future` Dart.
 
@@ -490,7 +490,7 @@ use.cancellation.throwIfCancelled();
 
 O Runtime mantém ownership físico do Scope/resources até a conclusão real.
 
-# 12. Um Runtime por feature quando o lifetime pedir
+## 12. Um Runtime por feature quando o lifetime pedir
 
 Use `BetterEffectFeatureScope` para checkout, editor, wizard, sessão autenticada ou outro subtree que compartilha resources:
 
@@ -521,9 +521,9 @@ Os resources da feature sobrevivem a múltiplas telas/ViewModels e fecham no dis
 
 Quando esse feature Runtime substitui o Runtime efetivo do subtree, `EffectViewModelBuilder` recria ViewModels owned contra o novo `EffectCommands`.
 
-# 13. Use as extensions do `BuildContext` nos boundaries corretos
+## 13. Use as extensions do `BuildContext` nos boundaries corretos
 
-## Factory de ViewModel
+### Factory de ViewModel
 
 ```dart
 final vm = LoginViewModel(context.effectCommands);
@@ -531,13 +531,13 @@ final vm = LoginViewModel(context.effectCommands);
 
 Esse read não escuta mudanças do scope.
 
-## Adapter que deve reagir ao scope
+### Adapter que deve reagir ao scope
 
 ```dart
 final commands = context.watchEffectCommands();
 ```
 
-## Runtime direto
+### Runtime direto
 
 ```dart
 final runtime = context.effectRuntime;
@@ -545,7 +545,7 @@ final runtime = context.effectRuntime;
 
 Reserve para integration boundaries.
 
-## Executar Effect sem Command
+### Executar Effect sem Command
 
 ```dart
 final result = await context.runEffect(loadConfiguration());
@@ -554,7 +554,7 @@ final exit = await context.runEffectExit(loadConfiguration());
 
 Isso é útil quando a operação não precisa de estado Command observável.
 
-## Resolver serviço no boundary
+### Resolver serviço no boundary
 
 ```dart
 final router = context.readEffectService<AppRouter>();
@@ -562,7 +562,7 @@ final router = context.readEffectService<AppRouter>();
 
 Evite transformar isso em service locator dentro da lógica de widget. Business code deve continuar usando `use<T>()` no Effect.
 
-# 14. Observabilidade atravessa core e Flutter
+## 14. Observabilidade atravessa core e Flutter
 
 No Runtime:
 
@@ -586,7 +586,7 @@ final commands = EffectCommands(
 
 Eles são complementares.
 
-# 15. Widget tests usam ownership externo
+## 15. Widget tests usam ownership externo
 
 ```dart
 import 'package:better_effect_flutter/testing.dart';
@@ -608,7 +608,7 @@ await tester.pumpWidget(
 
 O entrypoint de testing também oferece probes de Command, listener e policy.
 
-# 16. Qual peça entra em cada problema?
+## 16. Qual peça entra em cada problema?
 
 | Problema | API |
 | --- | --- |
@@ -628,7 +628,7 @@ O entrypoint de testing também oferece probes de Command, listener e policy.
 | pending/queue/trigger/lastExit | `EffectCommandSelector.snapshot` |
 | widget test | `BetterEffectTestApp` |
 
-# O que é regra e o que é escolha
+## O que é regra e o que é escolha
 
 - **Regra semântica:** Runtime e Commands precisam de owners claros.
 - **Regra semântica:** failure, defect e interruption continuam outcomes diferentes.
@@ -639,7 +639,7 @@ O entrypoint de testing também oferece probes de Command, listener e policy.
 - **Não é regra:** um ViewModel por tela.
 - **Não é regra:** todo Effect precisa virar Command.
 
-# Próximos passos
+## Próximos passos
 
 - [Mapa completo de `better_effect_flutter`](../packages/better_effect_flutter)
 - [Políticas de Command](./command-policies)
