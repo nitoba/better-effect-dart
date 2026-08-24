@@ -1,31 +1,96 @@
 ---
 title: Packages
-description: Responsabilidade, dependências e escolha entre os três packages publicados
+description: Como o core Dart, a integração Flutter e o analyzer formam uma única arquitetura
 ---
 
 O repositório contém três packages publicados e um package interno de conformance. A linha documentada é `0.4.x`.
 
+A principal coisa a entender é que **Dart e Flutter não são duas implementações separadas**. `better_effect_flutter` depende de `better_effect`, reexporta sua API pública e adiciona uma camada de integração com o widget tree. O `Effect`, o `Module`, o `Runtime`, o `Scope`, os resources, o retry, a concorrência e os outcomes continuam sendo os mesmos.
+
+```text
+better_effect
+  Effect + Module + Runtime + Scope + Exit
+                │
+                │ reexportado e usado diretamente por
+                ▼
+better_effect_flutter
+  Runtime ownership no widget tree
+  + EffectCommand
+  + EffectCommandState
+  + ViewModel helpers
+  + Flutter widgets
+                │
+                │ verificado em desenvolvimento por
+                ▼
+better_effect_analyzer
+  warnings + lints + graph checker + CLI
+```
+
+Em uma aplicação Flutter, portanto, você normalmente escreve domínio e infraestrutura usando as APIs do core e usa as APIs Flutter somente quando precisa conectar essa execução à árvore, a um ViewModel ou ao estado visual.
+
 | Package | Responsabilidade | Depende de | Use em |
 | --- | --- | --- | --- |
-| `better_effect` | Effect, DI, Module, Runtime, Scope, recursos, retry e concorrência | `result_dart`, `auto_injector` | Dart e camadas compartilhadas |
-| `better_effect_flutter` | Commands, state, widgets e lifecycle Flutter | `better_effect`, Flutter | borda de apresentação |
+| `better_effect` | Effect, DI, Module, Runtime, Scope, resources, retry, concorrência e observabilidade | `result_dart`, `auto_injector` | Dart, domínio, data, services, CLI, backend e código compartilhado |
+| `better_effect_flutter` | Commands, estado observável, ownership na árvore e widgets Flutter | `better_effect`, Flutter | composição e apresentação Flutter |
 | `better_effect_analyzer` | plugin, lints, graph checker, CLI e API de grafo | tooling do analyzer | desenvolvimento e CI |
 
 `better_effect_conformance` não é um quarto package de uso da aplicação. Ele é uma suíte interna que executa o contrato de `SEMANTICS.md` para impedir regressões nas garantias estáveis de lifecycle e outcomes.
 
 <Cards>
-  <Card title="better_effect" href="/docs/packages/better_effect" description="Comece aqui para código Dart: Effects, dependências contextuais e ownership de recursos." />
-  <Card title="better_effect_flutter" href="/docs/packages/better_effect_flutter" description="Use na UI quando Effects precisam virar Commands e estado observável." />
+  <Card title="better_effect" href="/docs/packages/better_effect" description="Entenda o runtime que continua existindo por baixo de uma aplicação Flutter." />
+  <Card title="better_effect_flutter" href="/docs/packages/better_effect_flutter" description="Veja a superfície Flutter completa: bootstrap, scopes, Commands, ViewModels e todos os widgets." />
   <Card title="better_effect_analyzer" href="/docs/packages/better_effect_analyzer" description="Adicione como tooling para encontrar erros locais e validar o grafo completo." />
 </Cards>
+
+## Em uma aplicação Flutter, o fluxo atravessa os dois packages
+
+Considere um login:
+
+```text
+Widget
+  │ executa
+  ▼
+EffectCommand<LoginInput, Session, AuthFailure>     better_effect_flutter
+  │ executa
+  ▼
+Effect<Session, AuthFailure>                        better_effect
+  │ resolve
+  ▼
+AuthRepository → AuthApi                            better_effect
+  │
+  ▼
+Runtime / Module / Scope                            better_effect
+  │ produz
+  ▼
+Exit<Session, AuthFailure>                          better_effect
+  │ projetado em
+  ▼
+EffectCommandState<Session, AuthFailure>            better_effect_flutter
+  │
+  ▼
+Builder / Listener / Consumer / Selector            better_effect_flutter
+```
+
+Isso também significa que recursos como `Effect.retry`, `Effect.forEach`, `Runtime.fork`, `runWith`, `EffectLocal`, `RuntimeObserver` e `package:better_effect/testing.dart` **não deixam de existir no Flutter**. Eles fazem parte do mesmo programa e podem ser usados por Effects executados por Commands.
 
 ## Como escolher
 
 Em uma app Flutter, normalmente instale somente `better_effect_flutter` em `dependencies`: ele já traz e reexporta o core. Adicione `better_effect_analyzer` separadamente como tooling quando quiser diagnósticos/CI.
 
-Em um package Dart compartilhado, use somente `better_effect`. Isso evita acoplar domínio ou infraestrutura ao Flutter.
+Em um package Dart compartilhado, use somente `better_effect`. Isso mantém domínio e infraestrutura independentes do Flutter, mesmo quando esse package é consumido por uma aplicação Flutter.
 
 O analyzer não é requisito do Runtime. Desabilitá-lo não muda a semântica da aplicação; ele existe para detectar problemas antes da execução.
+
+## Onde começar
+
+Se você está construindo uma aplicação Flutter do zero:
+
+1. leia o [core `better_effect`](./better_effect) para entender `Effect`, failures, `Module`, `Runtime` e resources;
+2. continue para a [superfície completa do `better_effect_flutter`](./better_effect_flutter);
+3. use o guia [Flutter: integração completa](../guides/flutter-mvvm) para montar o fluxo ponta a ponta;
+4. ative o [`better_effect_analyzer`](./better_effect_analyzer) quando quiser feedback no editor e CI.
+
+Se você já entende o core, pode ir diretamente para a página Flutter: ela agora funciona também como mapa completo de todas as APIs de integração.
 
 ## Versões
 
