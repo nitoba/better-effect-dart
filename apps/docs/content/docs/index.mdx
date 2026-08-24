@@ -1,19 +1,50 @@
 ---
 title: Visão geral
-description: Effects tipados, dependências contextuais e lifecycle explícito para Dart e Flutter
+description: Uma arquitetura única de Effects para Dart e Flutter
 ---
 
 `better_effect` é uma família de packages para descrever operações de aplicação como `Effect<A, E>`, executar essas operações em um ambiente de dependências explícito e manter o ownership de recursos até a conclusão física do trabalho.
 
-No Flutter, o mesmo modelo é projetado em `EffectCommandState<A, E>` para que a UI consiga distinguir loading, sucesso, falha esperada, defect e interrupção sem espalhar booleans e callbacks pelo widget tree.
+No Flutter, **esse modelo não é substituído por outro**. `better_effect_flutter` usa e reexporta o mesmo `Effect`, `Module`, `Runtime`, `Scope` e `Exit`; a camada Flutter acrescenta Commands, ownership no widget tree, ViewModels opcionais e widgets para renderizar ou reagir ao estado da execução.
 
 A linha documentada atualmente é `0.4.x`.
+
+## Dart e Flutter fazem parte do mesmo fluxo
+
+```text
+                     better_effect
+┌──────────────────────────────────────────────────────────┐
+│ Module → Runtime → Effect<A, E> → Exit<A, E>            │
+│   │        │          │              │                   │
+│   │        │          ├─ DI           ├─ Success         │
+│   │        │          ├─ resources    ├─ Failure         │
+│   │        │          ├─ retry        ├─ Defect          │
+│   │        │          └─ concurrency  └─ Interrupted     │
+└───────────────────────────┬──────────────────────────────┘
+                            │
+                            │ mesmo Runtime e mesmo Effect
+                            ▼
+                 better_effect_flutter
+┌──────────────────────────────────────────────────────────┐
+│ BetterEffectScope / Provider / Bootstrap                 │
+│                    ↓                                     │
+│               EffectCommands                             │
+│                    ↓                                     │
+│               EffectCommand                              │
+│                    ↓                                     │
+│            EffectCommandState                            │
+│                    ↓                                     │
+│ Builder / Listener / Consumer / Selector                 │
+└──────────────────────────────────────────────────────────┘
+```
+
+Isso é importante porque APIs como `Effect.retry`, `Effect.forEach`, `Runtime.fork`, `runWith`, `EffectLocal`, `RuntimeObserver`, resources e testing continuam disponíveis em uma aplicação Flutter. O package Flutter adiciona a borda de apresentação; ele não cria um segundo runtime nem uma segunda semântica de erro.
 
 ## Escolha o package pelo problema
 
 <Cards>
-  <Card title="better_effect" href="/docs/packages/better_effect" description="Core Dart: Effect, Module, Runtime, Scope, recursos, retry, concorrência e observabilidade." />
-  <Card title="better_effect_flutter" href="/docs/packages/better_effect_flutter" description="Integração Flutter: Commands, ViewModels opcionais, widgets, lifecycle e Runtime por feature." />
+  <Card title="better_effect" href="/docs/packages/better_effect" description="Core Dart: Effect, Module, Runtime, Scope, resources, retry, concorrência e observabilidade." />
+  <Card title="better_effect_flutter" href="/docs/packages/better_effect_flutter" description="Camada Flutter completa: ownership, Commands, ViewModels, todos os widgets e feature Runtimes." />
   <Card title="better_effect_analyzer" href="/docs/packages/better_effect_analyzer" description="Tooling: warnings no Analysis Server, lints opt-in e validação do grafo de Modules no CI." />
 </Cards>
 
@@ -28,20 +59,23 @@ Em aplicações pequenas, `Future`, exceptions e um client acessado diretamente 
 - quem possui uma conexão, subscription ou transaction e quando ela fecha?
 - o segundo toque deve ser ignorado, substituir a execução visível ou entrar em fila?
 - uma interrupção da UI realmente cancelou o `Future` ou apenas deixou de esperar seu resultado?
+- uma feature precisa de resources próprios sem promovê-los ao Runtime da aplicação?
 - o grafo de dependências continua completo depois de uma refatoração?
 
-A família separa essas responsabilidades:
+A família separa essas responsabilidades sem esconder a relação entre elas:
 
 ```text
 Module       descreve o ambiente
    ↓
-Runtime      possui serviços, execuções e recursos
+Runtime      possui serviços, execuções e resources
    ↓
 Effect<A, E> descreve a operação
    ↓
 Exit<A, E>   preserva o outcome completo
    ↓
-Command      projeta a execução para Flutter, quando necessário
+Command      executa o mesmo Effect na borda Flutter
+   ↓
+State        projeta o outcome para a View
 ```
 
 ## O primeiro princípio: nem todo erro é igual
@@ -56,7 +90,27 @@ Command      projeta a execução para Flutter, quando necessário
 
 Interrupção é um quarto outcome em `Exit`: `ExitInterrupted`.
 
-`Runtime.run` e `Module.run` devolvem `ResultDart<A, E>` e repropagam defects como exceções. Use `runExit` quando a borda precisa inspecionar o outcome completo como valor.
+No Flutter, `EffectCommandState<A, E>` preserva essa mesma separação com estados próprios para success, failure, defect e interruption. O Command não reduz o modelo a `loading + error`.
+
+## O que existe na camada Flutter
+
+A integração Flutter é dividida por responsabilidade:
+
+| Responsabilidade | APIs |
+| --- | --- |
+| iniciar a aplicação | `runBetterEffectApp`, `BetterEffectBootstrap` |
+| publicar um Runtime existente | `BetterEffectProvider`, `BetterEffectProvider.value`, `BetterEffectScope` |
+| criar ambiente por feature | `BetterEffectFeatureScope` |
+| criar Commands | `EffectCommands`, `EffectCommand0`, `EffectCommand` |
+| possuir Commands | `EffectViewModel`, `EffectCommandOwner`, `EffectViewModelBuilder` |
+| renderizar estado | `EffectCommandBuilder` |
+| executar side effects one-shot | `EffectCommandListener` |
+| combinar render + listener | `EffectCommandConsumer` |
+| reduzir rebuilds | `EffectCommandSelector`, `EffectCommandSelector.snapshot` |
+| acessar o scope | `context.effectCommands`, `watchEffectCommands`, `effectRuntime`, `runEffect`, `runEffectExit`, `readEffectService` |
+| testar widgets | `BetterEffectTestApp` e probes de `package:better_effect_flutter/testing.dart` |
+
+A página [`better_effect_flutter`](/docs/packages/better_effect_flutter) explica essa superfície inteira e o guia [Flutter: integração completa](/docs/guides/flutter-mvvm) mostra como as peças se encaixam em um fluxo real.
 
 ## Comece em poucos passos
 
@@ -64,8 +118,8 @@ Interrupção é um quarto outcome em `Exit`: `ExitInterrupted`.
 2. Leia o [modelo mental](/docs/getting-started/mental-model) para entender `Effect`, `Module`, `Runtime`, `Scope` e `Exit`.
 3. Execute a [primeira feature](/docs/getting-started/first-feature), que usa uma API realista e um override de teste.
 4. Aprofunde [falhas e composição de Effects](/docs/guides/effects).
-5. Defina ownership com [recursos e ciclo de vida](/docs/guides/resources-and-lifetimes).
-6. No Flutter, siga [Flutter MVVM e Commands](/docs/guides/flutter-mvvm).
+5. Defina ownership com [resources e ciclo de vida](/docs/guides/resources-and-lifetimes).
+6. No Flutter, leia primeiro o [mapa completo do package](/docs/packages/better_effect_flutter) e depois siga [Flutter: integração completa](/docs/guides/flutter-mvvm).
 7. Antes do CI, ative os [diagnósticos do analyzer](/docs/guides/diagnostics).
 
 Depois disso, escolha guias avançados conforme o problema: [coleções](/docs/guides/collection-composition), [retry](/docs/guides/retry), [Modules por execução](/docs/guides/execution-scoped-modules), [feature scopes](/docs/guides/feature-scopes) e [observabilidade](/docs/guides/observability).
@@ -104,7 +158,7 @@ Um agente deve sempre preferir a API da versão instalada no projeto quando ela 
 
 <Cards>
   <Card title="Contrato semântico" href="/docs/semantics" description="Regras normativas de lifecycle, outcomes, scopes, concorrência, retry e Commands." />
+  <Card title="Flutter completo" href="/docs/packages/better_effect_flutter" description="Mapa de bootstrap, scopes, Commands, ViewModels, widgets e testing." />
   <Card title="Guias" href="/docs/guides" description="Fluxos de uso por problema, do core ao Flutter." />
-  <Card title="Packages" href="/docs/packages" description="Responsabilidade, compatibilidade e API de cada package." />
   <Card title="IA e Agent Skill" href="/docs/ai" description="Índices LLM, skill oficial e orientação para coding agents." />
 </Cards>
