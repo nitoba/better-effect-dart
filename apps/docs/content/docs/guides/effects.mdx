@@ -1,18 +1,22 @@
 ---
 title: Efeitos e falhas tipadas
-description: Construa um fluxo real de login sem perder a semântica dos erros
+description: Modele I/O, falhas esperadas e defects sem esconder o que aconteceu
 ---
 
-Uma operação de produção normalmente combina mais de uma etapa: ler cache,
-chamar API, validar a resposta, salvar a sessão e registrar auditoria. O valor
-de `Effect` aparece quando essas etapas continuam componíveis mesmo com falhas
-e dependências diferentes.
+Uma operação de produção costuma combinar rede, cache, validação e outras dependências. `Effect<A, E>` é útil quando essas etapas precisam continuar lazy e componíveis sem transformar todo problema em uma exception genérica.
 
-## Um domínio completo
+A ideia central é simples:
 
-Vamos modelar login. A UI não precisa saber como o token é obtido; o repository
-não precisa conhecer o widget; o `Module` decide quais implementações estão
-ativas.
+```text
+Effect<A, E>
+  ├─ sucesso esperado → A
+  ├─ falha esperada   → E
+  └─ evento inesperado → defect
+```
+
+## Um fluxo de login executável
+
+O exemplo abaixo usa uma API em memória para continuar executável. A fronteira `AuthApi` pode depois receber uma implementação HTTP sem alterar o `Effect`.
 
 ```dart
 import 'package:better_effect/better_effect.dart';
@@ -27,7 +31,11 @@ final class InvalidCredentials extends AuthFailure {
 
 final class AuthUnavailable extends AuthFailure {
   const AuthUnavailable(this.cause);
-  final Object cause;
+  final Exception cause;
+}
+
+final class InvalidCredentialsException implements Exception {
+  const InvalidCredentialsException();
 }
 
 final class Session {
@@ -40,16 +48,19 @@ abstract interface class AuthApi {
   Future<Session> signIn(String email, String password);
 }
 
-abstract interface class SessionCache {
-  Future<void> write(Session session);
-}
-
-final class AuthApiHttp implements AuthApi {
+final class DemoAuthApi implements AuthApi {
   @override
   Future<Session> signIn(String email, String password) async {
-    // Adapter HTTP omitido: transforme a resposta da API em Session.
-    throw UnimplementedError();
+    if (password != 'secret') {
+      throw const InvalidCredentialsException();
+    }
+
+    return Session(userId: email, token: 'demo-token');
   }
+}
+
+abstract interface class SessionCache {
+  Future<void> write(Session session);
 }
 
 final class SessionCacheMemory implements SessionCache {
@@ -66,112 +77,156 @@ AuthEffect<Session> signIn(String email, String password) =>
       final api = use<AuthApi>();
       final cache = use<SessionCache>();
 
-      final session = await use.unwrap(
-        Effect.tryAsync(
-          () => api.signIn(email, password),
-          onError: (error, stack) => AuthUnavailable(error),
-        ),
+      final session = await use.tryAsync(
+        () => api.signIn(email, password),
+        onError: (error, stackTrace) => switch (error) {
+          InvalidCredentialsException() => const InvalidCredentials(),
+          _ => AuthUnavailable(error),
+        },
       );
 
-      await use.unwrap(
-        Effect.tryAsync(
-          () => cache.write(session),
-          onError: (error, stack) => AuthUnavailable(error),
-        ),
+      await use.tryAsync(
+        () => cache.write(session),
+        onError: (error, stackTrace) => AuthUnavailable(error),
       );
 
       return session;
     });
-```
 
-As implementações concretas (`AuthApiHttp` e `SessionCacheMemory`) ficam no
-Module, não dentro do use case:
-
-```dart
 final authModule = Module([
-  .provide<AuthApi>(AuthApiHttp.new),
+  .provide<AuthApi>(DemoAuthApi.new),
   .provide<SessionCache>(SessionCacheMemory.new),
 ]);
 ```
 
-Observe três decisões no exemplo:
-
-1. `AuthFailure` descreve falhas que o produto pode tratar;
-2. as dependências são resolvidas no `EffectContext`, não em um singleton;
-3. cada etapa é lazy e só roda quando um `Runtime` a executa.
-
-## Não transforme todo erro em falha de domínio
-
-`tryAsync` captura objetos `Exception` que pertencem ao contrato da aplicação.
-Um `Error`, uma dependência ausente ou uma falha no cleanup continua sendo
-defeito. Isso é intencional: esconder um bug como “não foi possível fazer
-login” atrapalha logs, alertas e correção.
+Agora a operação pode ser executada sem saber qual implementação concreta está por trás das interfaces:
 
 ```dart
-final result = await runtime.run(signIn(email, password));
+final result = await authModule.run(
+  signIn('dev@example.com', 'secret'),
+);
 
 result.fold(
-  (session) => openHome(session),
-  (failure) => showAuthMessage(failure),
+  (session) => print('Sessão: ${session.userId}'),
+  (failure) => print('Falha de login: $failure'),
 );
 ```
 
-Quando uma borda precisa distinguir todos os resultados — por exemplo, um
-worker que envia métricas — use `runExit`:
+Três decisões ficam explícitas:
+
+1. `AuthFailure` contém condições que o caller pode tratar;
+2. dependências são resolvidas durante a execução, não em um singleton global;
+3. criar `signIn(...)` não chama API nem cache até um Runtime executá-lo.
+
+## Escolha conscientemente a fronteira de exceptions
+
+`Effect.tryAsync` e `use.tryAsync` capturam objetos que implementam `Exception` e os entregam ao `onError`.
+
+`Error` e outros objetos lançados continuam sendo defects. Isso evita esconder um `StateError`, um bug de programação ou outro evento inesperado como “falha de login”.
+
+Quando a aplicação realmente precisa mapear **qualquer** objeto lançado para `E`, use `Effect.tryAll` de forma explícita:
 
 ```dart
-final exit = await runtime.runExit(signIn(email, password));
+final parsed = Effect.tryAll<Data, ParseFailure>(
+  decodePayload,
+  onError: (error, stackTrace) => ParseFailure(error),
+);
+```
+
+Essa escolha amplia a fronteira de captura; não é equivalente ao comportamento padrão de `tryAsync`.
+
+## `run` para domínio, `runExit` para a borda completa
+
+`Runtime.run`/`Module.run` devolvem `ResultDart<A, E>`. Defects permanecem visíveis como exceptions em vez de serem inventados dentro de `E`.
+
+Quando uma borda precisa distinguir todos os outcomes como valor, use `runExit`:
+
+```dart
+final exit = await authModule.runExit(
+  signIn('dev@example.com', 'secret'),
+);
 
 switch (exit) {
   case ExitSuccess(value: final session):
-    audit('login_success', session.userId);
+    print('Login: ${session.userId}');
   case ExitFailure(error: final failure):
-    audit('login_rejected', failure);
-  case ExitDefect(defect: final defect, stackTrace: final stack):
-    reportCrash(defect, stack);
+    print('Falha esperada: $failure');
+  case ExitDefect(defect: final defect, stackTrace: final stackTrace):
+    print('Defect: $defect\n$stackTrace');
   case ExitInterrupted():
-    audit('login_interrupted', null);
+    print('Execução interrompida');
 }
 ```
 
-## Compose sem callbacks aninhados
+## Propague Effects e Results dentro de `Effect.result`
 
-Depois de separar as operações, `flatMap`, `map`, `catchAll` e `zip` permitem
-compor fluxos sem executar prematuramente:
+`EffectContext<E>` oferece operações que preservam a falha tipada do fluxo:
+
+```dart
+Effect<User, AppFailure> loadUser(String id) => Effect.result((use) async {
+  final repository = use<UserRepository>();
+  return use.unwrap(repository.find(id));
+});
+```
+
+`use.unwrap` executa o Effect aninhado no mesmo contexto e propaga `E`. `use.result` faz o mesmo para um `ResultDart<A, E>` já existente.
+
+Quando o fluxo precisa falhar diretamente:
+
+```dart
+return use.fail(const UserNotFound());
+```
+
+## Componha sem executar prematuramente
+
+Operadores como `map`, `flatMap`, `mapError`, `catchAll`, `tap` e `zip` constroem outra descrição lazy:
 
 ```dart
 final dashboard = Effect.zip(
   loadProfile(),
   loadNotifications(),
-).map((pair) => Dashboard(profile: pair.$1, notifications: pair.$2));
+).map(
+  (pair) => Dashboard(
+    profile: pair.$1,
+    notifications: pair.$2,
+  ),
+);
 ```
 
-Use `Effect.parZip` quando as duas leituras são independentes e podem começar
-ao mesmo tempo. Use `Effect.zip` quando a ordem ou o custo de concorrência
-importar. Ambos preservam a mesma falha tipada.
+`Effect.zip` executa os lados em sequência. `Effect.parZip` inicia os dois; como Dart não fornece cancelamento físico geral para `Future`, se um lado terminar primeiro com falha/defect o outro ainda é aguardado antes de o Scope ser liberado.
 
-## Recursos e cleanup
+Para coleções maiores, use [composição de coleções](./collection-composition) em vez de montar árvores de `parZip`.
 
-Um client ou conexão que pertence ao Runtime deve ser declarado como resource:
+## Resources não são apenas dependências
+
+Uma conexão que pertence ao Runtime deve declarar aquisição e release juntos:
 
 ```dart
 final module = Module([
   .resource<DatabaseConnection>(
-    acquire: (services) async => DatabaseConnection.open(),
-    release: (connection) => connection.close(),
+    acquire: (_) => DatabaseConnection.open(),
+    release: (connection, exit) => connection.close(),
   ),
   .provide<OrderRepository>(OrderRepositoryLive.new),
 ]);
 ```
 
-Recursos são adquiridos na ordem da declaração e fechados na ordem inversa.
-Para um recurso que deve viver apenas durante uma execução, use
-`use.acquire` dentro do Effect; o release ocorrerá mesmo quando a operação
-falhar.
+O callback de release recebe o `Exit` que fechou o Scope. Resources do Module são adquiridos na ordem de declaração e fechados em ordem reversa.
+
+Quando um recurso pertence somente à execução atual, use `use.acquire`:
+
+```dart
+final file = await use.acquire(
+  openTemporaryFile(),
+  release: (file, exit) => file.delete(),
+);
+```
+
+Veja [recursos e ciclo de vida](./resources-and-lifetimes) para shutdown, cleanup failure e ownership físico após timeout/interruption.
 
 ## Contexto por execução sem global
 
-Request IDs, tenant e metadados de tracing podem viajar com o Effect:
+`EffectLocal<T>` transporta contexto por execução:
 
 ```dart
 const requestId = EffectLocal<String>('unknown', name: 'requestId');
@@ -180,12 +235,17 @@ final program = logRequest().withLocal(requestId, 'req-42');
 await runtime.run(program);
 ```
 
-Effects aninhados enxergam o local; outra execução recebe outro valor. Isso
-evita usar variáveis globais ou `Zone` para dados que pertencem à requisição.
+Use `EffectLocal.metadata` quando o valor também deve aparecer em eventos de observabilidade. Não projete tokens, senhas ou payloads sensíveis como metadata.
 
 ## Quando não usar Effect
 
-Não envolva toda função pura em `Effect`. Validações locais, mapeamentos e
-formatadores podem continuar sendo Dart comum. Use Effect quando há pelo menos
-uma destas fronteiras: dependência contextual, I/O, falha esperada, recurso ou
-composição que precisa ser testada com implementações alternativas.
+Não envolva toda função pura em `Effect`. Validações locais, formatadores e mapeamentos que não precisam de I/O, dependência contextual, falha tipada ou resource podem continuar como Dart comum.
+
+A abstração é mais útil nas fronteiras em que a aplicação precisa responder com precisão **o que pode falhar, de que ambiente depende e quem possui os recursos usados pela operação**.
+
+## Próximos passos
+
+- [Coleções e concorrência limitada](./collection-composition)
+- [Retry determinístico](./retry)
+- [Recursos e ciclo de vida](./resources-and-lifetimes)
+- [Flutter MVVM](./flutter-mvvm)
